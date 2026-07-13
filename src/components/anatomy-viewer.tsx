@@ -14,7 +14,49 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
-const MODEL_URL = "/anatomy-layers/muscular-system.glb?v=anatomy-layers-1";
+const ANATOMY_LAYERS = [
+  { id: "skeletal-system", name: "Skeletal", file: "skeletal-system.glb" },
+  {
+    id: "muscular-insertions",
+    name: "Insertions",
+    file: "muscular-insertions.glb",
+  },
+  { id: "joints", name: "Joints", file: "joints.glb" },
+  {
+    id: "muscular-system",
+    name: "Muscular",
+    file: "muscular-system.glb",
+  },
+  {
+    id: "cardiovascular-system",
+    name: "Cardiovascular",
+    file: "cardiovascular-system.glb",
+  },
+  {
+    id: "lymphoid-organs",
+    name: "Lymphoid",
+    file: "lymphoid-organs.glb",
+  },
+  {
+    id: "nervous-system-sense-organs",
+    name: "Nervous & senses",
+    file: "nervous-system-sense-organs.glb",
+  },
+  {
+    id: "visceral-systems",
+    name: "Visceral",
+    file: "visceral-systems.glb",
+  },
+] as const;
+
+type AnatomyLayerId = (typeof ANATOMY_LAYERS)[number]["id"];
+
+const DEFAULT_LAYER: AnatomyLayerId = "muscular-system";
+const DEFAULT_LAYER_CONFIG = ANATOMY_LAYERS.find(
+  (layer) => layer.id === DEFAULT_LAYER,
+)!;
+const layerUrl = (file: string) =>
+  `/anatomy-layers/${file}?v=anatomy-layers-1`;
 const HIDDEN_MUSCLE_COVERINGS = new Set([
   "Articular capsule",
   "Bursa",
@@ -47,10 +89,28 @@ class ModelErrorBoundary extends Component<
   }
 }
 
-function AnatomyModel({ onReady }: { onReady: () => void }) {
-  const gltf = useLoader(GLTFLoader, MODEL_URL, (loader) => {
+function useAnatomyLayer(url: string) {
+  return useLoader(GLTFLoader, url, (loader) => {
     loader.setMeshoptDecoder(MeshoptDecoder);
   });
+}
+
+function LayerModel({ url }: { url: string }) {
+  const gltf = useAnatomyLayer(url);
+  const scene = useMemo(() => gltf.scene.clone(true), [gltf.scene]);
+
+  return <primitive object={scene} dispose={null} />;
+}
+
+function AnatomyModel({
+  selectedLayers,
+  onReady,
+}: {
+  selectedLayers: ReadonlySet<AnatomyLayerId>;
+  onReady: () => void;
+}) {
+  const gltf = useAnatomyLayer(layerUrl(DEFAULT_LAYER_CONFIG.file));
+  const selectionKey = [...selectedLayers].sort().join(",");
 
   const fittedModel = useMemo(() => {
     const scene = gltf.scene.clone(true);
@@ -90,15 +150,27 @@ function AnatomyModel({ onReady }: { onReady: () => void }) {
     };
   }, [gltf.scene]);
 
-  useEffect(onReady, [onReady]);
+  useEffect(onReady, [onReady, selectionKey]);
 
   return (
-    <primitive
-      object={fittedModel.scene}
+    <group
       position={fittedModel.position}
       scale={fittedModel.scale}
-      dispose={null}
-    />
+    >
+      {ANATOMY_LAYERS.map((layer) => {
+        if (!selectedLayers.has(layer.id)) return null;
+        if (layer.id === DEFAULT_LAYER) {
+          return (
+            <primitive
+              key={layer.id}
+              object={fittedModel.scene}
+              dispose={null}
+            />
+          );
+        }
+        return <LayerModel key={layer.id} url={layerUrl(layer.file)} />;
+      })}
+    </group>
   );
 }
 
@@ -128,11 +200,23 @@ function CameraControls() {
 }
 
 export function AnatomyViewer() {
+  const [selectedLayers, setSelectedLayers] = useState<
+    Set<AnatomyLayerId>
+  >(() => new Set([DEFAULT_LAYER]));
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     "loading",
   );
   const handleReady = useCallback(() => setStatus("ready"), []);
   const handleError = useCallback(() => setStatus("error"), []);
+  const toggleLayer = useCallback((id: AnatomyLayerId) => {
+    setStatus("loading");
+    setSelectedLayers((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   return (
     <div
@@ -160,10 +244,45 @@ export function AnatomyViewer() {
           />
           <CameraControls />
           <Suspense fallback={null}>
-            <AnatomyModel onReady={handleReady} />
+            <AnatomyModel
+              selectedLayers={selectedLayers}
+              onReady={handleReady}
+            />
           </Suspense>
         </Canvas>
       </ModelErrorBoundary>
+
+      <div
+        className="absolute bottom-2 left-2 top-2 z-10 flex w-36 flex-col gap-0.5 overflow-y-auto rounded-md border border-white/10 bg-black/70 p-1 backdrop-blur-sm"
+        aria-label="Anatomy layers"
+      >
+        {ANATOMY_LAYERS.map((layer) => {
+          const selected = selectedLayers.has(layer.id);
+          return (
+            <button
+              key={layer.id}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => toggleLayer(layer.id)}
+              className={`flex min-h-6 items-center gap-2 rounded px-2 py-1 text-left text-[10px] transition-colors ${
+                selected
+                  ? "bg-white/10 text-white"
+                  : "text-white/45 hover:bg-white/5 hover:text-white/70"
+              }`}
+            >
+              <span
+                aria-hidden="true"
+                className={`size-2 shrink-0 rounded-[2px] border ${
+                  selected
+                    ? "border-white bg-white"
+                    : "border-white/30 bg-transparent"
+                }`}
+              />
+              <span className="truncate">{layer.name}</span>
+            </button>
+          );
+        })}
+      </div>
 
       {status === "loading" && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center text-xs text-white/50">
