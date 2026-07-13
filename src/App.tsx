@@ -36,6 +36,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { AnatomyViewer } from "@/components/anatomy-viewer";
 
 const RENDERING_ENGINE_ID = "medview-rendering-engine";
 const VIEWPORT_ID = "medview-stack-viewport";
@@ -534,6 +535,8 @@ function App() {
 
       <main className="relative flex min-h-0 flex-1">
         <section className="flex min-w-0 flex-1 flex-col">
+          <AnatomyViewer />
+
           <div
             className="relative min-h-0 flex-1 overflow-hidden bg-black outline-none focus-visible:ring-2 focus-visible:ring-ring"
             onWheel={handleWheel}
