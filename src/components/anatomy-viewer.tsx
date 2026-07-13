@@ -67,6 +67,16 @@ const HIDDEN_MUSCLE_COVERINGS = new Set([
   "Fascia",
   "Ligament",
 ]);
+const MODEL_UNITS_PER_MILLIMETER = 2 / 1800;
+const VERTICAL_PLANE_HEIGHT_SCALE = 1.45;
+
+export type DicomSlicePlane = {
+  anatomicalCenterModelY: number;
+  imageOrientation: [number, number, number, number, number, number];
+  offsetFromSeriesCenterMm: number;
+  widthMm: number;
+  heightMm: number;
+};
 
 type ModelErrorBoundaryProps = {
   children: ReactNode;
@@ -202,7 +212,99 @@ function CameraControls() {
   return null;
 }
 
-export function AnatomyViewer() {
+function patientDirectionToModel(direction: readonly number[]) {
+  return new THREE.Vector3(direction[0], direction[2], -direction[1]);
+}
+
+function SlicePlaneIndicator({ plane }: { plane: DicomSlicePlane }) {
+  const transform = useMemo(() => {
+    const horizontal = patientDirectionToModel(
+      plane.imageOrientation.slice(0, 3),
+    ).normalize();
+    const vertical = patientDirectionToModel(
+      plane.imageOrientation.slice(3, 6),
+    ).normalize();
+    const normal = new THREE.Vector3()
+      .crossVectors(horizontal, vertical)
+      .normalize();
+    const basis = new THREE.Matrix4().makeBasis(horizontal, vertical, normal);
+
+    const position = normal.multiplyScalar(
+      plane.offsetFromSeriesCenterMm * MODEL_UNITS_PER_MILLIMETER,
+    );
+    position.y += plane.anatomicalCenterModelY;
+
+    return {
+      position,
+      quaternion: new THREE.Quaternion().setFromRotationMatrix(basis),
+      width: THREE.MathUtils.clamp(
+        plane.widthMm * MODEL_UNITS_PER_MILLIMETER,
+        0.2,
+        2,
+      ),
+      height: THREE.MathUtils.clamp(
+        plane.heightMm *
+          MODEL_UNITS_PER_MILLIMETER *
+          THREE.MathUtils.lerp(
+            1,
+            VERTICAL_PLANE_HEIGHT_SCALE,
+            Math.abs(vertical.y),
+          ),
+        0.2,
+        2,
+      ),
+    };
+  }, [plane]);
+
+  const geometries = useMemo(() => {
+    const surface = new THREE.PlaneGeometry(transform.width, transform.height);
+    return {
+      surface,
+      outline: new THREE.EdgesGeometry(surface),
+    };
+  }, [transform.height, transform.width]);
+
+  useEffect(
+    () => () => {
+      geometries.outline.dispose();
+      geometries.surface.dispose();
+    },
+    [geometries],
+  );
+
+  return (
+    <group
+      position={transform.position}
+      quaternion={transform.quaternion}
+    >
+      <mesh geometry={geometries.surface} renderOrder={10}>
+        <meshBasicMaterial
+          color="#ef4444"
+          opacity={0.24}
+          transparent
+          side={THREE.DoubleSide}
+          depthTest={false}
+          depthWrite={false}
+        />
+      </mesh>
+      <lineSegments geometry={geometries.outline} renderOrder={11}>
+        <lineBasicMaterial
+          color="#f87171"
+          opacity={0.9}
+          transparent
+          depthTest={false}
+          depthWrite={false}
+        />
+      </lineSegments>
+    </group>
+  );
+}
+
+export function AnatomyViewer({
+  slicePlane = null,
+}: {
+  slicePlane?: DicomSlicePlane | null;
+}) {
   const [selectedLayers, setSelectedLayers] = useState<
     Set<AnatomyLayerId>
   >(() => new Set([DEFAULT_LAYER]));
@@ -228,7 +330,7 @@ export function AnatomyViewer() {
     >
       <ModelErrorBoundary onError={handleError}>
         <Canvas
-          camera={{ fov: 32, near: 0.01, far: 20, position: [0.75, 0.08, 3.8] }}
+          camera={{ fov: 32, near: 0.01, far: 20, position: [1.8, 0.15, 3.35] }}
           dpr={[1, 1.5]}
           gl={{ antialias: true }}
           onCreated={({ gl }) => {
@@ -252,6 +354,7 @@ export function AnatomyViewer() {
               onReady={handleReady}
             />
           </Suspense>
+          {slicePlane && <SlicePlaneIndicator plane={slicePlane} />}
         </Canvas>
       </ModelErrorBoundary>
 
