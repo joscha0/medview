@@ -1,0 +1,62 @@
+{
+  "source_blend": "/home/joscha/Downloads/Z-Anatomy/Startup-web.blend",
+  "source_stats": {
+    "objects": 5520,
+    "mesh_objects": 4569,
+    "curve_objects": 951,
+    "font_objects": 0,
+    "materials": 188
+  },
+  "removed_objects": 0,
+  "subdivision_modifiers_reduced": 1241,
+  "anatomy_collections": [
+    "1: Skeletal system",
+    "2: Muscular insertions",
+    "3: Joints",
+    "4: Muscular system",
+    "5: Cardiovascular system",
+    "6: Lymphoid organs",
+    "7: Nervous system & Sense organs",
+    "8: Visceral systems"
+  ],
+  "excluded_group_labels": 6,
+  "export_objects": 5153,
+  "simplify_ratio": 0.18,
+  "raw_glb": {
+    "bytes": 86592968,
+    "nodes": 3626,
+    "meshes": 2699,
+    "primitives": 3074,
+    "vertices": 2528462,
+    "triangles": 4610932,
+    "materials": 154,
+    "extensions_used": [
+      "KHR_materials_clearcoat",
+      "KHR_materials_specular",
+      "KHR_materials_anisotropy",
+      "KHR_materials_ior"
+    ],
+    "extensions_required": []
+  },
+  "optimized_glb": {
+    "bytes": 6153944,
+    "nodes": 3182,
+    "meshes": 1551,
+    "primitives": 1836,
+    "vertices": 380519,
+    "triangles": 690846,
+    "materials": 38,
+    "extensions_used": [
+      "KHR_mesh_quantization",
+      "EXT_meshopt_compression",
+      "KHR_materials_clearcoat",
+      "KHR_materials_ior",
+      "KHR_materials_specular",
+      "KHR_materials_anisotropy"
+    ],
+    "extensions_required": [
+      "KHR_mesh_quantization",
+      "EXT_meshopt_compression"
+    ]
+  }
+}
