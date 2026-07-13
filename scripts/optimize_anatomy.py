@@ -15,6 +15,7 @@ def parse_args():
     parser.add_argument("--gltfpack", required=True)
     parser.add_argument("--simplify", type=float, default=0.18)
     parser.add_argument("--report", required=True)
+    parser.add_argument("--skip-blend-save", action="store_true")
     args = []
     if "--" in os.sys.argv:
         args = os.sys.argv[os.sys.argv.index("--") + 1 :]
@@ -66,6 +67,94 @@ def enable_layer_collection(layer_collection):
     layer_collection.hide_viewport = False
     for child in layer_collection.children:
         enable_layer_collection(child)
+
+
+def color_value(socket):
+    value = getattr(socket, "default_value", None)
+    if value is None or not hasattr(value, "__len__") or len(value) != 4:
+        return None
+    return tuple(float(component) for component in value)
+
+
+def direct_material_color(material):
+    if not material.node_tree:
+        return None
+
+    nodes = list(material.node_tree.nodes)
+    for node in nodes:
+        if node.type == "BSDF_PRINCIPLED":
+            color = color_value(node.inputs.get("Base Color"))
+            if color:
+                return color
+
+    # Z-Anatomy's reusable shader groups are not representable in glTF. Their
+    # intended base palette is exposed through RGB, Gamma, or group sockets.
+    for node in nodes:
+        if node.type == "RGB":
+            color = color_value(node.outputs.get("Color"))
+            if color:
+                return color
+
+    for node in nodes:
+        if node.type == "GAMMA":
+            color = color_value(node.inputs.get("Color"))
+            if color:
+                return color
+
+    for node in nodes:
+        if node.type != "GROUP":
+            continue
+        for socket_name in ("Color", "Color1", "Color2"):
+            color = color_value(node.inputs.get(socket_name))
+            if color and color[:3] != (0.5, 0.5, 0.5):
+                return color
+
+    return None
+
+
+def web_material_colors():
+    direct_colors = {
+        material.name: direct_material_color(material)
+        for material in bpy.data.materials
+    }
+    resolved = {}
+
+    for material in bpy.data.materials:
+        color = direct_colors[material.name]
+        if color is None:
+            family_name = material.name.rstrip("'")
+            if "-" in family_name:
+                family_name = family_name.rsplit("-", 1)[0]
+            color = direct_colors.get(family_name)
+        if color is None:
+            color = tuple(float(component) for component in material.diffuse_color)
+        resolved[material.name] = color
+
+    return resolved
+
+
+def convert_materials_for_web():
+    colors = web_material_colors()
+    converted = 0
+
+    for material in bpy.data.materials:
+        color = colors[material.name]
+        material.use_nodes = True
+        nodes = material.node_tree.nodes
+        nodes.clear()
+        output = nodes.new("ShaderNodeOutputMaterial")
+        shader = nodes.new("ShaderNodeBsdfPrincipled")
+        shader.inputs["Base Color"].default_value = color
+        shader.inputs["Metallic"].default_value = 0.0
+        shader.inputs["Roughness"].default_value = 0.62
+        shader.inputs["Alpha"].default_value = color[3]
+        material.node_tree.links.new(shader.outputs["BSDF"], output.inputs["Surface"])
+        material.diffuse_color = color
+        if color[3] < 0.999 and hasattr(material, "surface_render_method"):
+            material.surface_render_method = "DITHERED"
+        converted += 1
+
+    return converted
 
 
 args = parse_args()
@@ -169,9 +258,12 @@ bpy.context.view_layer.objects.active = export_objects[0]
 if remove_objects:
     bpy.data.orphans_purge(do_recursive=True)
 
+materials_converted_for_web = convert_materials_for_web()
+
 # Save a clean, non-destructive web source. The original Startup.blend remains
 # untouched, while this copy retains editable anatomy and capped modifiers.
-bpy.ops.wm.save_as_mainfile(filepath=str(blend_output), check_existing=False)
+if not args.skip_blend_save:
+    bpy.ops.wm.save_as_mainfile(filepath=str(blend_output), check_existing=False)
 
 export_result = bpy.ops.export_scene.gltf(
     filepath=str(raw_glb),
@@ -237,6 +329,7 @@ report = {
     "subdivision_modifiers_reduced": subdivision_modifiers_reduced,
     "anatomy_collections": [collection.name for collection in anatomy_collections],
     "excluded_group_labels": len(excluded_group_labels),
+    "materials_converted_for_web": materials_converted_for_web,
     "export_objects": len(export_objects),
     "simplify_ratio": args.simplify,
     "raw_glb": raw_stats,

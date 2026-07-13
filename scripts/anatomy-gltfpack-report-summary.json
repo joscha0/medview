@@ -20,39 +20,31 @@
     "8: Visceral systems"
   ],
   "excluded_group_labels": 6,
+  "materials_converted_for_web": 188,
   "export_objects": 5153,
   "simplify_ratio": 0.18,
   "raw_glb": {
-    "bytes": 86592968,
+    "bytes": 86510496,
     "nodes": 3626,
     "meshes": 2699,
     "primitives": 3074,
-    "vertices": 2528462,
+    "vertices": 2528446,
     "triangles": 4610932,
     "materials": 154,
-    "extensions_used": [
-      "KHR_materials_clearcoat",
-      "KHR_materials_specular",
-      "KHR_materials_anisotropy",
-      "KHR_materials_ior"
-    ],
+    "extensions_used": [],
     "extensions_required": []
   },
   "optimized_glb": {
-    "bytes": 6153944,
-    "nodes": 3182,
-    "meshes": 1551,
-    "primitives": 1836,
-    "vertices": 380519,
-    "triangles": 690846,
-    "materials": 38,
+    "bytes": 6162996,
+    "nodes": 3191,
+    "meshes": 1559,
+    "primitives": 1855,
+    "vertices": 380613,
+    "triangles": 688463,
+    "materials": 88,
     "extensions_used": [
       "KHR_mesh_quantization",
-      "EXT_meshopt_compression",
-      "KHR_materials_clearcoat",
-      "KHR_materials_ior",
-      "KHR_materials_specular",
-      "KHR_materials_anisotropy"
+      "EXT_meshopt_compression"
     ],
     "extensions_required": [
       "KHR_mesh_quantization",

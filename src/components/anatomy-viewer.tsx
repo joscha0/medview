@@ -14,7 +14,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
-const MODEL_URL = "/anatomy-optimized.glb";
+const MODEL_URL = "/anatomy-optimized.glb?v=anatomy-palette-2";
 
 type ModelErrorBoundaryProps = {
   children: ReactNode;
@@ -116,15 +116,15 @@ export function AnatomyViewer() {
           onCreated={({ gl }) => {
             gl.outputColorSpace = THREE.SRGBColorSpace;
             gl.toneMapping = THREE.ACESFilmicToneMapping;
-            gl.toneMappingExposure = 1.1;
+            gl.toneMappingExposure = 0.8;
           }}
         >
           <color attach="background" args={["#000000"]} />
-          <hemisphereLight args={[0xffffff, 0x202020, 2.4]} />
-          <directionalLight intensity={3.5} position={[3, 4, 5]} />
+          <hemisphereLight args={[0xffffff, 0x202020, 0.9]} />
+          <directionalLight intensity={1.4} position={[3, 4, 5]} />
           <directionalLight
             color={0x9cc8ff}
-            intensity={2}
+            intensity={0.55}
             position={[-4, 2, -3]}
           />
           <CameraControls />
