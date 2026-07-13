@@ -17,6 +17,9 @@ importers:
       '@cornerstonejs/dicom-image-loader':
         specifier: ^5.5.1
         version: 5.5.1(@cornerstonejs/core@5.5.1(@babel/preset-env@7.29.7(@babel/core@7.29.7))(@cornerstonejs/metadata@5.5.1)(@cornerstonejs/utils@5.5.1)(autoprefixer@10.5.2(postcss@8.5.19))(wslink@2.5.0))(@cornerstonejs/metadata@5.5.1)(dicom-parser@1.8.21)
+      '@cornerstonejs/metadata':
+        specifier: ^5.5.1
+        version: 5.5.1
       '@fontsource-variable/inter':
         specifier: ^5.2.8
         version: 5.2.8

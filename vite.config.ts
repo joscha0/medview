@@ -11,6 +11,7 @@ export default defineConfig({
     exclude: ["@cornerstonejs/dicom-image-loader"],
     // Its Emscripten codec factories are CommonJS and still need interop.
     include: [
+      "@cornerstonejs/metadata",
       "@cornerstonejs/dicom-image-loader > @cornerstonejs/codec-charls/decodewasmjs",
       "@cornerstonejs/dicom-image-loader > @cornerstonejs/codec-libjpeg-turbo-8bit/decodewasmjs",
       "@cornerstonejs/dicom-image-loader > @cornerstonejs/codec-openjpeg/decodewasmjs",
@@ -21,6 +22,7 @@ export default defineConfig({
     ],
   },
   resolve: {
+    dedupe: ["@cornerstonejs/core", "@cornerstonejs/metadata"],
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },

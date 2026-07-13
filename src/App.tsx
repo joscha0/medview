@@ -11,6 +11,11 @@ import {
   wadouri,
 } from "@cornerstonejs/dicom-image-loader";
 import {
+  Enums as MetadataEnums,
+  utilities as metadataUtilities,
+} from "@cornerstonejs/metadata";
+import { parseDicom, type DataSet } from "dicom-parser";
+import {
   AlertCircle,
   ChevronLeft,
   ChevronRight,
@@ -35,12 +40,24 @@ import { Card, CardContent } from "@/components/ui/card";
 const RENDERING_ENGINE_ID = "medview-rendering-engine";
 const VIEWPORT_ID = "medview-stack-viewport";
 const LOAD_TIMEOUT_MS = 30_000;
+const HEADER_READ_SIZE = 1024 * 1024;
+const HEADER_READER_COUNT = 4;
 const fileNameCollator = new Intl.Collator(undefined, {
   numeric: true,
   sensitivity: "base",
 });
 
 let initializationPromise: Promise<void> | undefined;
+
+type Vector3 = [number, number, number];
+
+type DicomFileInfo = {
+  file: File;
+  imageOrientation?: [number, number, number, number, number, number];
+  imagePosition?: Vector3;
+  instanceNumber?: number;
+  seriesInstanceUid: string;
+};
 
 function initializeCornerstone() {
   if (!initializationPromise) {
@@ -51,8 +68,6 @@ function initializeCornerstone() {
           1,
           Math.min(navigator.hardwareConcurrency || 1, 4),
         ),
-        // The local-file path is more stable with the dataset-backed provider.
-        useLegacyMetadataProvider: true,
       });
     });
   }
@@ -60,23 +75,213 @@ function initializeCornerstone() {
   return initializationPromise;
 }
 
-function withTimeout<T>(promise: Promise<T>, message: string): Promise<T> {
+function withTimeout<T>(
+  promise: Promise<T>,
+  message: string,
+  onTimeout?: () => void,
+): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(
-      () => reject(new Error(message)),
-      LOAD_TIMEOUT_MS,
-    );
+    let settled = false;
+    const timeout = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      onTimeout?.();
+      reject(new Error(message));
+    }, LOAD_TIMEOUT_MS);
 
     promise.then(
       (value) => {
+        if (settled) {
+          onTimeout?.();
+          return;
+        }
+        settled = true;
         window.clearTimeout(timeout);
         resolve(value);
       },
       (error: unknown) => {
+        if (settled) {
+          onTimeout?.();
+          return;
+        }
+        settled = true;
         window.clearTimeout(timeout);
         reject(error);
       },
     );
+  });
+}
+
+function parseNumberList(value: string | undefined, length: number) {
+  if (!value) return undefined;
+
+  const values = value.split("\\").map(Number);
+  if (
+    values.length !== length ||
+    values.some((item) => !Number.isFinite(item))
+  ) {
+    return undefined;
+  }
+
+  return values;
+}
+
+async function parseDicomHeader(file: File): Promise<DicomFileInfo> {
+  function parse(blob: Blob): Promise<DataSet> {
+    return blob.arrayBuffer().then((buffer) =>
+      parseDicom(new Uint8Array(buffer), {
+        untilTag: "x7fe00010",
+      }),
+    );
+  }
+
+  let dataSet: DataSet;
+  const headerBlob = file.slice(0, Math.min(file.size, HEADER_READ_SIZE));
+
+  try {
+    dataSet = await parse(headerBlob);
+  } catch {
+    try {
+      dataSet = await parse(file);
+    } catch {
+      throw new Error(`${file.name} is not a readable DICOM Part 10 file.`);
+    }
+  }
+
+  const seriesInstanceUid = dataSet.string("x0020000e")?.trim();
+  if (!seriesInstanceUid) {
+    throw new Error(`${file.name} does not contain a Series Instance UID.`);
+  }
+
+  const imagePosition = parseNumberList(
+    dataSet.string("x00200032"),
+    3,
+  ) as Vector3 | undefined;
+  const imageOrientation = parseNumberList(
+    dataSet.string("x00200037"),
+    6,
+  ) as DicomFileInfo["imageOrientation"];
+  const instanceNumber = dataSet.intString("x00200013");
+
+  return {
+    file,
+    imageOrientation,
+    imagePosition,
+    instanceNumber,
+    seriesInstanceUid,
+  };
+}
+
+async function readDicomHeaders(files: File[]) {
+  const results = new Array<DicomFileInfo>(files.length);
+  let nextIndex = 0;
+
+  async function readNext() {
+    while (nextIndex < files.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await parseDicomHeader(files[index]);
+    }
+  }
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(HEADER_READER_COUNT, files.length) },
+      readNext,
+    ),
+  );
+
+  return results;
+}
+
+function getSliceNormal(
+  orientation: DicomFileInfo["imageOrientation"],
+): Vector3 | undefined {
+  if (!orientation) return undefined;
+
+  const normal: Vector3 = [
+    orientation[1] * orientation[5] - orientation[2] * orientation[4],
+    orientation[2] * orientation[3] - orientation[0] * orientation[5],
+    orientation[0] * orientation[4] - orientation[1] * orientation[3],
+  ];
+  const magnitude = Math.hypot(...normal);
+
+  if (!magnitude) return undefined;
+  return normal.map((value) => value / magnitude) as Vector3;
+}
+
+function sortDicomFiles(files: DicomFileInfo[]) {
+  const normal = getSliceNormal(
+    files.find((item) => item.imageOrientation)?.imageOrientation,
+  );
+  const hasSpatialOrder = Boolean(
+    normal && files.every((item) => item.imagePosition),
+  );
+
+  return [...files].sort((first, second) => {
+    if (hasSpatialOrder && normal) {
+      const firstPosition = first.imagePosition as Vector3;
+      const secondPosition = second.imagePosition as Vector3;
+      const firstDistance = firstPosition.reduce(
+        (distance, value, index) => distance + value * normal[index],
+        0,
+      );
+      const secondDistance = secondPosition.reduce(
+        (distance, value, index) => distance + value * normal[index],
+        0,
+      );
+
+      if (Math.abs(firstDistance - secondDistance) > 0.0001) {
+        return firstDistance - secondDistance;
+      }
+    }
+
+    if (
+      first.instanceNumber !== undefined &&
+      second.instanceNumber !== undefined &&
+      first.instanceNumber !== second.instanceNumber
+    ) {
+      return first.instanceNumber - second.instanceNumber;
+    }
+
+    return fileNameCollator.compare(first.file.name, second.file.name);
+  });
+}
+
+function getManagedFileIndex(imageId: string) {
+  const match = /^dicomfile:(\d+)$/.exec(imageId);
+  return match ? Number(match[1]) : undefined;
+}
+
+function removeCachedImage(imageId: string) {
+  const loadObject = cache.getImageLoadObject(imageId);
+  try {
+    loadObject?.cancelFn?.();
+  } catch {
+    // Some loaders expose cancellation only for part of their lifecycle.
+  }
+
+  try {
+    if (cache.getImageLoadObject(imageId)) {
+      cache.removeImageLoadObject(imageId, { force: true });
+    }
+  } catch {
+    // The cache entry may have completed or been removed concurrently.
+  }
+}
+
+function releaseImageIds(imageIds: string[], removeFiles = true) {
+  imageIds.forEach((imageId) => {
+    removeCachedImage(imageId);
+    metadataUtilities.clearTypedCacheData(
+      MetadataEnums.MetadataModules.NATURALIZED,
+      imageId,
+    );
+
+    if (removeFiles) {
+      const fileIndex = getManagedFileIndex(imageId);
+      if (fileIndex !== undefined) wadouri.fileManager.remove(fileIndex);
+    }
   });
 }
 
@@ -97,6 +302,8 @@ function App() {
   const imageIdsRef = useRef<string[]>([]);
   const dragDepthRef = useRef(0);
   const loadGenerationRef = useRef(0);
+  const navigationGenerationRef = useRef(0);
+  const pendingImageIdsRef = useRef<string[]>([]);
 
   const [isReady, setIsReady] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -138,9 +345,15 @@ function App() {
 
     return () => {
       cancelled = true;
+      loadGenerationRef.current += 1;
+      navigationGenerationRef.current += 1;
       resizeObserver?.disconnect();
       renderingEngineRef.current?.destroy();
       renderingEngineRef.current = null;
+      releaseImageIds(pendingImageIdsRef.current);
+      releaseImageIds(imageIdsRef.current);
+      pendingImageIdsRef.current = [];
+      imageIdsRef.current = [];
     };
   }, []);
 
@@ -152,6 +365,8 @@ function App() {
     const safeIndex = Math.max(0, Math.min(nextIndex, imageIds.length - 1));
     if (safeIndex === currentIndexRef.current) return;
 
+    const previousIndex = currentIndexRef.current;
+    const navigationGeneration = ++navigationGenerationRef.current;
     currentIndexRef.current = safeIndex;
     setCurrentIndex(safeIndex);
     setError(null);
@@ -160,7 +375,11 @@ function App() {
     void withTimeout(
       viewport.setImageIdIndex(safeIndex),
       "This slice took too long to decode.",
+      () => removeCachedImage(imageIds[safeIndex]),
     ).catch((navigationError: unknown) => {
+      if (navigationGeneration !== navigationGenerationRef.current) return;
+      currentIndexRef.current = previousIndex;
+      setCurrentIndex(previousIndex);
       setError(getErrorMessage(navigationError));
     });
   }, []);
@@ -175,47 +394,74 @@ function App() {
     }
 
     const generation = ++loadGenerationRef.current;
+    navigationGenerationRef.current += 1;
+    releaseImageIds(pendingImageIdsRef.current);
+    pendingImageIdsRef.current = [];
     setIsLoading(true);
-    setLoadingMessage("Preparing files…");
+    setLoadingMessage("Reading DICOM headers…");
     setError(null);
 
+    let candidateImageIds: string[] = [];
+
     try {
-      const sortedFiles = [...files].sort((first, second) =>
-        fileNameCollator.compare(first.name, second.name),
+      const dicomFiles = await readDicomHeaders(files);
+      if (generation !== loadGenerationRef.current) return;
+
+      const seriesInstanceUids = new Set(
+        dicomFiles.map((item) => item.seriesInstanceUid),
       );
+      if (seriesInstanceUids.size !== 1) {
+        throw new Error(
+          "The dropped files contain more than one DICOM series. Drop one series at a time.",
+        );
+      }
 
-      // Local image IDs are reused from zero, so clear old cached images first.
-      cache.purgeCache();
-      wadouri.fileManager.purge();
+      const sortedFiles = sortDicomFiles(dicomFiles).map((item) => item.file);
 
-      const imageIds = sortedFiles.map((file) => wadouri.fileManager.add(file));
-      const initialIndex = Math.floor(imageIds.length / 2);
+      candidateImageIds = sortedFiles.map((file) =>
+        wadouri.fileManager.add(file),
+      );
+      pendingImageIdsRef.current = candidateImageIds;
+      const initialIndex = Math.floor(candidateImageIds.length / 2);
 
       setLoadingMessage("Decoding first image…");
       await withTimeout(
-        imageLoader.loadAndCacheImage(imageIds[initialIndex]),
+        imageLoader.loadAndCacheImage(candidateImageIds[initialIndex]),
         "The first image took too long to decode. Check that the files contain DICOM pixel data.",
+        () => releaseImageIds(candidateImageIds),
       );
-      if (generation !== loadGenerationRef.current) return;
+      if (generation !== loadGenerationRef.current) {
+        releaseImageIds(candidateImageIds);
+        return;
+      }
 
       setLoadingMessage("Displaying series…");
       const viewport = renderingEngine.getViewport<StackViewport>(VIEWPORT_ID);
       await withTimeout(
-        viewport.setStack(imageIds, initialIndex),
+        viewport.setStack(candidateImageIds, initialIndex),
         "The image was decoded, but the viewer could not display it.",
+        () => releaseImageIds(candidateImageIds),
       );
-      if (generation !== loadGenerationRef.current) return;
+      if (generation !== loadGenerationRef.current) {
+        releaseImageIds(candidateImageIds);
+        return;
+      }
 
       viewport.render();
-      imageIdsRef.current = imageIds;
+      const previousImageIds = imageIdsRef.current;
+      imageIdsRef.current = candidateImageIds;
+      pendingImageIdsRef.current = [];
       currentIndexRef.current = initialIndex;
       setCurrentIndex(initialIndex);
-      setImageCount(imageIds.length);
+      setImageCount(candidateImageIds.length);
+      releaseImageIds(previousImageIds);
     } catch (loadError) {
-      if (generation !== loadGenerationRef.current) return;
-      imageIdsRef.current = [];
-      setImageCount(0);
-      setCurrentIndex(0);
+      if (generation !== loadGenerationRef.current) {
+        releaseImageIds(candidateImageIds);
+        return;
+      }
+      releaseImageIds(candidateImageIds);
+      pendingImageIdsRef.current = [];
       setError(getErrorMessage(loadError));
     } finally {
       if (generation === loadGenerationRef.current) setIsLoading(false);
