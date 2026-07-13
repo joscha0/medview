@@ -1,56 +1,5 @@
 {
-  "source_blend": "/home/joscha/Downloads/Z-Anatomy/Startup.blend",
-  "source_stats": {
-    "objects": 7184,
-    "mesh_objects": 4569,
-    "curve_objects": 951,
-    "font_objects": 1660,
-    "materials": 188
-  },
-  "removed_objects": 1664,
-  "subdivision_modifiers_reduced": 1241,
-  "anatomy_collections": [
-    "1: Skeletal system",
-    "2: Muscular insertions",
-    "3: Joints",
-    "4: Muscular system",
-    "5: Cardiovascular system",
-    "6: Lymphoid organs",
-    "7: Nervous system & Sense organs",
-    "8: Visceral systems"
-  ],
-  "excluded_group_labels": 6,
-  "materials_converted_for_web": 188,
-  "export_objects": 5153,
-  "simplify_ratio": 0.35,
-  "raw_glb": {
-    "bytes": 86510456,
-    "nodes": 3626,
-    "meshes": 2699,
-    "primitives": 3074,
-    "vertices": 2528446,
-    "triangles": 4610932,
-    "materials": 154,
-    "extensions_used": [],
-    "extensions_required": []
-  },
-  "optimized_glb": {
-    "bytes": 10386628,
-    "nodes": 3191,
-    "meshes": 1562,
-    "primitives": 1859,
-    "vertices": 735932,
-    "triangles": 1343623,
-    "materials": 89,
-    "extensions_used": [
-      "KHR_mesh_quantization",
-      "EXT_meshopt_compression"
-    ],
-    "extensions_required": [
-      "KHR_mesh_quantization",
-      "EXT_meshopt_compression"
-    ]
-  },
+  "defaultLayer": "muscular-system",
   "layers": [
     {
       "id": "skeletal-system",

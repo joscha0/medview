@@ -14,7 +14,14 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
-const MODEL_URL = "/anatomy-optimized.glb?v=anatomy-palette-2";
+const MODEL_URL = "/anatomy-layers/muscular-system.glb?v=anatomy-layers-1";
+const HIDDEN_MUSCLE_COVERINGS = new Set([
+  "Articular capsule",
+  "Bursa",
+  "Cartilage",
+  "Fascia",
+  "Ligament",
+]);
 
 type ModelErrorBoundaryProps = {
   children: ReactNode;
@@ -47,6 +54,30 @@ function AnatomyModel({ onReady }: { onReady: () => void }) {
 
   const fittedModel = useMemo(() => {
     const scene = gltf.scene.clone(true);
+    const materials = new Map<string, THREE.Material>();
+
+    scene.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+
+      const sourceMaterials = Array.isArray(object.material)
+        ? object.material
+        : [object.material];
+      const clonedMaterials = sourceMaterials.map((source) => {
+        const material = materials.get(source.uuid);
+        if (material) {
+          return material;
+        }
+
+        const clone = source.clone() as THREE.Material;
+        clone.visible = !HIDDEN_MUSCLE_COVERINGS.has(clone.name);
+        materials.set(source.uuid, clone);
+        return clone;
+      });
+      object.material = Array.isArray(object.material)
+        ? clonedMaterials
+        : clonedMaterials[0];
+    });
+
     const bounds = new THREE.Box3().setFromObject(scene);
     const center = bounds.getCenter(new THREE.Vector3());
     const sphere = bounds.getBoundingSphere(new THREE.Sphere());
@@ -116,15 +147,15 @@ export function AnatomyViewer() {
           onCreated={({ gl }) => {
             gl.outputColorSpace = THREE.SRGBColorSpace;
             gl.toneMapping = THREE.ACESFilmicToneMapping;
-            gl.toneMappingExposure = 0.8;
+            gl.toneMappingExposure = 0.7;
           }}
         >
           <color attach="background" args={["#000000"]} />
-          <hemisphereLight args={[0xffffff, 0x202020, 0.9]} />
-          <directionalLight intensity={1.4} position={[3, 4, 5]} />
+          <hemisphereLight args={[0xffffff, 0x202020, 0.55]} />
+          <directionalLight intensity={1.05} position={[3, 4, 5]} />
           <directionalLight
             color={0x9cc8ff}
-            intensity={0.55}
+            intensity={0.3}
             position={[-4, 2, -3]}
           />
           <CameraControls />

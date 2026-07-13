@@ -3,6 +3,7 @@ import json
 import os
 import struct
 import subprocess
+import re
 from pathlib import Path
 
 import bpy
@@ -15,6 +16,7 @@ def parse_args():
     parser.add_argument("--gltfpack", required=True)
     parser.add_argument("--simplify", type=float, default=0.18)
     parser.add_argument("--report", required=True)
+    parser.add_argument("--layers-output")
     parser.add_argument("--skip-blend-save", action="store_true")
     args = []
     if "--" in os.sys.argv:
@@ -81,20 +83,8 @@ def direct_material_color(material):
         return None
 
     nodes = list(material.node_tree.nodes)
-    for node in nodes:
-        if node.type == "BSDF_PRINCIPLED":
-            color = color_value(node.inputs.get("Base Color"))
-            if color:
-                return color
-
     # Z-Anatomy's reusable shader groups are not representable in glTF. Their
     # intended base palette is exposed through RGB, Gamma, or group sockets.
-    for node in nodes:
-        if node.type == "RGB":
-            color = color_value(node.outputs.get("Color"))
-            if color:
-                return color
-
     for node in nodes:
         if node.type == "GAMMA":
             color = color_value(node.inputs.get("Color"))
@@ -107,6 +97,18 @@ def direct_material_color(material):
         for socket_name in ("Color", "Color1", "Color2"):
             color = color_value(node.inputs.get(socket_name))
             if color and color[:3] != (0.5, 0.5, 0.5):
+                return color
+
+    for node in nodes:
+        if node.type == "RGB":
+            color = color_value(node.outputs.get("Color"))
+            if color:
+                return color
+
+    for node in nodes:
+        if node.type == "BSDF_PRINCIPLED":
+            color = color_value(node.inputs.get("Base Color"))
+            if color:
                 return color
 
     return None
@@ -157,15 +159,78 @@ def convert_materials_for_web():
     return converted
 
 
+def export_selected_glb(path):
+    result = bpy.ops.export_scene.gltf(
+        filepath=str(path),
+        check_existing=False,
+        export_format="GLB",
+        use_selection=True,
+        use_active_scene=True,
+        use_visible=False,
+        use_renderable=False,
+        export_apply=True,
+        export_yup=True,
+        export_texcoords=False,
+        export_normals=True,
+        export_tangents=False,
+        export_attributes=False,
+        export_all_vertex_colors=True,
+        export_materials="EXPORT",
+        export_cameras=False,
+        export_lights=False,
+        export_animations=False,
+        export_extras=False,
+        export_skins=False,
+        export_morph=False,
+        use_mesh_edges=False,
+        use_mesh_vertices=False,
+    )
+    if result != {"FINISHED"}:
+        raise RuntimeError(f"Blender glTF export failed: {result}")
+
+
+def optimize_glb(source, destination, report, simplify):
+    command = [
+        str(gltfpack_path),
+        "-i",
+        str(source),
+        "-o",
+        str(destination),
+        "-c",
+        "-si",
+        str(simplify),
+        "-sp",
+        "-vpf",
+        "-vn",
+        "10",
+        "-r",
+        str(report),
+        "-v",
+    ]
+    subprocess.run(command, check=True)
+
+
+def layer_slug(collection_name):
+    label = collection_name.split(":", 1)[-1].strip().lower()
+    return re.sub(r"[^a-z0-9]+", "-", label).strip("-")
+
+
 args = parse_args()
 blend_output = Path(args.blend_output).expanduser().resolve()
 glb_output = Path(args.glb_output).expanduser().resolve()
 gltfpack_path = Path(args.gltfpack).expanduser().resolve()
 report_path = Path(args.report).expanduser().resolve()
 raw_glb = Path("/tmp/anatomy-web-raw.glb")
+layers_output = (
+    Path(args.layers_output).expanduser().resolve()
+    if args.layers_output
+    else None
+)
 
 for output in (blend_output, glb_output, report_path):
     output.parent.mkdir(parents=True, exist_ok=True)
+if layers_output:
+    layers_output.mkdir(parents=True, exist_ok=True)
 
 source_stats = {
     "objects": len(bpy.data.objects),
@@ -265,33 +330,7 @@ materials_converted_for_web = convert_materials_for_web()
 if not args.skip_blend_save:
     bpy.ops.wm.save_as_mainfile(filepath=str(blend_output), check_existing=False)
 
-export_result = bpy.ops.export_scene.gltf(
-    filepath=str(raw_glb),
-    check_existing=False,
-    export_format="GLB",
-    use_selection=True,
-    use_active_scene=True,
-    use_visible=False,
-    use_renderable=False,
-    export_apply=True,
-    export_yup=True,
-    export_texcoords=False,
-    export_normals=True,
-    export_tangents=False,
-    export_attributes=False,
-    export_all_vertex_colors=True,
-    export_materials="EXPORT",
-    export_cameras=False,
-    export_lights=False,
-    export_animations=False,
-    export_extras=False,
-    export_skins=False,
-    export_morph=False,
-    use_mesh_edges=False,
-    use_mesh_vertices=False,
-)
-if export_result != {"FINISHED"}:
-    raise RuntimeError(f"Blender glTF export failed: {export_result}")
+export_selected_glb(raw_glb)
 
 raw_stats = summarize_glb(raw_glb)
 
@@ -299,27 +338,49 @@ raw_stats = summarize_glb(raw_glb)
 # merges compatible scene data, quantizes attributes, and adds Meshopt stream
 # compression. Named nodes are intentionally not locked because this GLB is a
 # lightweight visual context model rather than an interactive anatomy atlas.
-command = [
-    str(gltfpack_path),
-    "-i",
-    str(raw_glb),
-    "-o",
-    str(glb_output),
-    "-c",
-    "-si",
-    str(args.simplify),
-    "-sp",
-    # The source uses a very large coordinate range. Floating-point position
-    # compression avoids visible quantization error while retaining Meshopt
-    # stream compression for transfer size.
-    "-vpf",
-    "-vn",
-    "10",
-    "-r",
-    str(report_path),
-    "-v",
-]
-subprocess.run(command, check=True)
+optimize_glb(raw_glb, glb_output, report_path, args.simplify)
+
+layer_reports = []
+if layers_output:
+    for index, collection in enumerate(anatomy_collections, start=1):
+        objects = {
+            obj
+            for obj in collection.objects
+            if obj.type in {"MESH", "CURVE"} and not obj.name.endswith(".g")
+        }
+        bpy.ops.object.select_all(action="DESELECT")
+        selected = []
+        for obj in objects:
+            if obj.name not in bpy.context.view_layer.objects:
+                continue
+            obj.hide_set(False)
+            obj.hide_viewport = False
+            obj.hide_render = False
+            obj.select_set(True)
+            selected.append(obj)
+        if not selected:
+            continue
+        bpy.context.view_layer.objects.active = selected[0]
+        slug = layer_slug(collection.name)
+        raw_layer = Path(f"/tmp/anatomy-layer-{index}-raw.glb")
+        output_layer = layers_output / f"{slug}.glb"
+        layer_report = layers_output / f"{slug}-report.json"
+        export_selected_glb(raw_layer)
+        optimize_glb(raw_layer, output_layer, layer_report, args.simplify)
+        layer_reports.append(
+            {
+                "id": slug,
+                "name": collection.name.split(":", 1)[-1].strip(),
+                "file": output_layer.name,
+                "objects": len(selected),
+                "stats": summarize_glb(output_layer),
+            }
+        )
+    (layers_output / "manifest.json").write_text(
+        json.dumps({"defaultLayer": "muscular-system", "layers": layer_reports}, indent=2)
+        + "\n",
+        encoding="utf-8",
+    )
 
 optimized_stats = summarize_glb(glb_output)
 report = {
@@ -334,6 +395,7 @@ report = {
     "simplify_ratio": args.simplify,
     "raw_glb": raw_stats,
     "optimized_glb": optimized_stats,
+    "layers": layer_reports,
 }
 
 summary_path = report_path.with_name(f"{report_path.stem}-summary.json")
