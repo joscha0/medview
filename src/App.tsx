@@ -66,6 +66,7 @@ type DicomFileInfo = {
   bodyPart?: string;
   seriesDescription?: string;
   studyDescription?: string;
+  patientHeightMm?: number;
   instanceNumber?: number;
   seriesInstanceUid: string;
 };
@@ -181,6 +182,11 @@ async function parseDicomHeader(file: File): Promise<DicomFileInfo> {
   const bodyPart = dataSet.string("x00180015")?.trim();
   const seriesDescription = dataSet.string("x0008103e")?.trim();
   const studyDescription = dataSet.string("x00081030")?.trim();
+  const patientSizeMeters = Number(dataSet.string("x00101020"));
+  const patientHeightMm =
+    Number.isFinite(patientSizeMeters) && patientSizeMeters > 0
+      ? patientSizeMeters * 1000
+      : undefined;
   const instanceNumber = dataSet.intString("x00200013");
 
   return {
@@ -193,6 +199,7 @@ async function parseDicomHeader(file: File): Promise<DicomFileInfo> {
     bodyPart,
     seriesDescription,
     studyDescription,
+    patientHeightMm,
     instanceNumber,
     seriesInstanceUid,
   };
@@ -283,6 +290,7 @@ function getDicomSlicePlane(
     !current?.imageOrientation ||
     !current.imagePosition ||
     !current.pixelSpacing ||
+    current.pixelSpacing.some((spacing) => spacing <= 0) ||
     !current.rows ||
     !current.columns
   ) {
@@ -313,30 +321,32 @@ function getDicomSlicePlane(
     (Math.min(...sliceDistances) + Math.max(...sliceDistances)) / 2;
 
   return {
-    anatomicalCenterModelY: getAnatomicalCenterModelY(current),
+    anatomicalCenterHeightFraction:
+      getAnatomicalCenterHeightFraction(current),
     imageOrientation: current.imageOrientation,
     offsetFromSeriesCenterMm: currentDistance - seriesCenter,
+    patientHeightMm: current.patientHeightMm,
     widthMm: current.columns * current.pixelSpacing[1],
     heightMm: current.rows * current.pixelSpacing[0],
   };
 }
 
-function getAnatomicalCenterModelY(file: DicomFileInfo) {
+function getAnatomicalCenterHeightFraction(file: DicomFileInfo) {
   const region = [file.bodyPart, file.seriesDescription, file.studyDescription]
     .filter(Boolean)
     .join(" ")
     .toUpperCase();
 
   if (/WHOLE.?BODY|FULL.?BODY/.test(region)) return 0;
-  if (/CHEST.*ABD.*PELV|THORAX.*ABD.*PELV/.test(region)) return 0.22;
-  if (/CHEST.*ABD|THORAX.*ABD/.test(region)) return 0.28;
-  if (/ABD.*PELV/.test(region)) return -0.02;
-  if (/HEAD|BRAIN|SKULL/.test(region)) return 0.82;
-  if (/NECK|CERVICAL/.test(region)) return 0.64;
-  if (/CHEST|THORAX|LUNG|COVID/.test(region)) return 0.38;
-  if (/ABDOMEN|ABDOMINAL/.test(region)) return 0.06;
-  if (/PELVIS|PELVIC|HIP/.test(region)) return -0.22;
-  if (/LEG|LOWER.?EXTREM/.test(region)) return -0.58;
+  if (/CHEST.*ABD.*PELV|THORAX.*ABD.*PELV/.test(region)) return 0.19;
+  if (/CHEST.*ABD|THORAX.*ABD/.test(region)) return 0.16;
+  if (/ABD.*PELV/.test(region)) return -0.01;
+  if (/HEAD|BRAIN|SKULL/.test(region)) return 0.45;
+  if (/NECK|CERVICAL/.test(region)) return 0.35;
+  if (/CHEST|THORAX|LUNG|COVID/.test(region)) return 0.21;
+  if (/ABDOMEN|ABDOMINAL/.test(region)) return 0.03;
+  if (/PELVIS|PELVIC|HIP/.test(region)) return -0.12;
+  if (/LEG|LOWER.?EXTREM/.test(region)) return -0.32;
   return 0;
 }
 

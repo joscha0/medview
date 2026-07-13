@@ -58,8 +58,7 @@ const DEFAULT_LAYER: AnatomyLayerId = "muscular-system";
 const DEFAULT_LAYER_CONFIG = ANATOMY_LAYERS.find(
   (layer) => layer.id === DEFAULT_LAYER,
 )!;
-const layerUrl = (file: string) =>
-  `/anatomy-layers/${file}?v=anatomy-layers-1`;
+const layerUrl = (file: string) => `/anatomy-layers/${file}?v=anatomy-layers-1`;
 const HIDDEN_MUSCLE_COVERINGS = new Set([
   "Articular capsule",
   "Bursa",
@@ -67,13 +66,14 @@ const HIDDEN_MUSCLE_COVERINGS = new Set([
   "Fascia",
   "Ligament",
 ]);
-const MODEL_UNITS_PER_MILLIMETER = 2 / 1800;
-const VERTICAL_PLANE_HEIGHT_SCALE = 1.45;
+const DEFAULT_PATIENT_HEIGHT_MM = 1800;
+const ATLAS_VERTICAL_PLANE_SCALE = 1.2;
 
 export type DicomSlicePlane = {
-  anatomicalCenterModelY: number;
+  anatomicalCenterHeightFraction: number;
   imageOrientation: [number, number, number, number, number, number];
   offsetFromSeriesCenterMm: number;
+  patientHeightMm?: number;
   widthMm: number;
   heightMm: number;
 };
@@ -117,9 +117,11 @@ function LayerModel({ url }: { url: string }) {
 
 function AnatomyModel({
   selectedLayers,
+  slicePlane,
   onReady,
 }: {
   selectedLayers: ReadonlySet<AnatomyLayerId>;
+  slicePlane: DicomSlicePlane | null;
   onReady: () => void;
 }) {
   const gltf = useAnatomyLayer(layerUrl(DEFAULT_LAYER_CONFIG.file));
@@ -155,10 +157,12 @@ function AnatomyModel({
     const center = bounds.getCenter(new THREE.Vector3());
     const sphere = bounds.getBoundingSphere(new THREE.Sphere());
     const scale = 1 / Math.max(sphere.radius, 0.1);
+    const modelHeight = bounds.getSize(new THREE.Vector3()).y * scale;
 
     return {
       scene,
       scale,
+      modelHeight,
       position: center.multiplyScalar(-scale),
     };
   }, [gltf.scene]);
@@ -166,24 +170,29 @@ function AnatomyModel({
   useEffect(onReady, [onReady, selectionKey]);
 
   return (
-    <group
-      position={fittedModel.position}
-      scale={fittedModel.scale}
-    >
-      {ANATOMY_LAYERS.map((layer) => {
-        if (!selectedLayers.has(layer.id)) return null;
-        if (layer.id === DEFAULT_LAYER) {
-          return (
-            <primitive
-              key={layer.id}
-              object={fittedModel.scene}
-              dispose={null}
-            />
-          );
-        }
-        return <LayerModel key={layer.id} url={layerUrl(layer.file)} />;
-      })}
-    </group>
+    <>
+      <group position={fittedModel.position} scale={fittedModel.scale}>
+        {ANATOMY_LAYERS.map((layer) => {
+          if (!selectedLayers.has(layer.id)) return null;
+          if (layer.id === DEFAULT_LAYER) {
+            return (
+              <primitive
+                key={layer.id}
+                object={fittedModel.scene}
+                dispose={null}
+              />
+            );
+          }
+          return <LayerModel key={layer.id} url={layerUrl(layer.file)} />;
+        })}
+      </group>
+      {slicePlane && (
+        <SlicePlaneIndicator
+          plane={slicePlane}
+          modelHeight={fittedModel.modelHeight}
+        />
+      )}
+    </>
   );
 }
 
@@ -216,7 +225,13 @@ function patientDirectionToModel(direction: readonly number[]) {
   return new THREE.Vector3(direction[0], direction[2], -direction[1]);
 }
 
-function SlicePlaneIndicator({ plane }: { plane: DicomSlicePlane }) {
+function SlicePlaneIndicator({
+  plane,
+  modelHeight,
+}: {
+  plane: DicomSlicePlane;
+  modelHeight: number;
+}) {
   const transform = useMemo(() => {
     const horizontal = patientDirectionToModel(
       plane.imageOrientation.slice(0, 3),
@@ -228,33 +243,28 @@ function SlicePlaneIndicator({ plane }: { plane: DicomSlicePlane }) {
       .crossVectors(horizontal, vertical)
       .normalize();
     const basis = new THREE.Matrix4().makeBasis(horizontal, vertical, normal);
+    const modelUnitsPerMillimeter =
+      modelHeight / (plane.patientHeightMm ?? DEFAULT_PATIENT_HEIGHT_MM);
 
     const position = normal.multiplyScalar(
-      plane.offsetFromSeriesCenterMm * MODEL_UNITS_PER_MILLIMETER,
+      plane.offsetFromSeriesCenterMm * modelUnitsPerMillimeter,
     );
-    position.y += plane.anatomicalCenterModelY;
+    position.y += plane.anatomicalCenterHeightFraction * modelHeight;
 
     return {
       position,
       quaternion: new THREE.Quaternion().setFromRotationMatrix(basis),
-      width: THREE.MathUtils.clamp(
-        plane.widthMm * MODEL_UNITS_PER_MILLIMETER,
-        0.2,
-        2,
-      ),
-      height: THREE.MathUtils.clamp(
+      width: plane.widthMm * modelUnitsPerMillimeter,
+      height:
         plane.heightMm *
-          MODEL_UNITS_PER_MILLIMETER *
-          THREE.MathUtils.lerp(
-            1,
-            VERTICAL_PLANE_HEIGHT_SCALE,
-            Math.abs(vertical.y),
-          ),
-        0.2,
-        2,
-      ),
+        modelUnitsPerMillimeter *
+        THREE.MathUtils.lerp(
+          1,
+          ATLAS_VERTICAL_PLANE_SCALE,
+          Math.abs(vertical.y),
+        ),
     };
-  }, [plane]);
+  }, [modelHeight, plane]);
 
   const geometries = useMemo(() => {
     const surface = new THREE.PlaneGeometry(transform.width, transform.height);
@@ -273,10 +283,7 @@ function SlicePlaneIndicator({ plane }: { plane: DicomSlicePlane }) {
   );
 
   return (
-    <group
-      position={transform.position}
-      quaternion={transform.quaternion}
-    >
+    <group position={transform.position} quaternion={transform.quaternion}>
       <mesh geometry={geometries.surface} renderOrder={10}>
         <meshBasicMaterial
           color="#ef4444"
@@ -305,9 +312,9 @@ export function AnatomyViewer({
 }: {
   slicePlane?: DicomSlicePlane | null;
 }) {
-  const [selectedLayers, setSelectedLayers] = useState<
-    Set<AnatomyLayerId>
-  >(() => new Set([DEFAULT_LAYER]));
+  const [selectedLayers, setSelectedLayers] = useState<Set<AnatomyLayerId>>(
+    () => new Set([DEFAULT_LAYER]),
+  );
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     "loading",
   );
@@ -351,10 +358,10 @@ export function AnatomyViewer({
           <Suspense fallback={null}>
             <AnatomyModel
               selectedLayers={selectedLayers}
+              slicePlane={slicePlane}
               onReady={handleReady}
             />
           </Suspense>
-          {slicePlane && <SlicePlaneIndicator plane={slicePlane} />}
         </Canvas>
       </ModelErrorBoundary>
 
@@ -369,9 +376,7 @@ export function AnatomyViewer({
               key={layer.id}
               className={cn(
                 "h-[76px] overflow-hidden rounded-md bg-black/30 shadow-none transition-colors",
-                selected
-                  ? "border-white/40 bg-white/10"
-                  : "border-white/10",
+                selected ? "border-white/40 bg-white/10" : "border-white/10",
               )}
             >
               <Button
