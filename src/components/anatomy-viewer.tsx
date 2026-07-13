@@ -13,6 +13,9 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { Button } from "@/components/ui/button";
+import { Card, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 const ANATOMY_LAYERS = [
   { id: "skeletal-system", name: "Skeletal", file: "skeletal-system.glb" },
@@ -39,7 +42,7 @@ const ANATOMY_LAYERS = [
   },
   {
     id: "nervous-system-sense-organs",
-    name: "Nervous & senses",
+    name: "Nervous / senses",
     file: "nervous-system-sense-organs.glb",
   },
   {
@@ -253,33 +256,44 @@ export function AnatomyViewer() {
       </ModelErrorBoundary>
 
       <div
-        className="absolute bottom-2 left-2 top-2 z-10 flex w-36 flex-col gap-0.5 overflow-y-auto rounded-md border border-white/10 bg-black/70 p-1 backdrop-blur-sm"
+        className="absolute bottom-2 left-2 top-2 z-10 grid w-60 auto-rows-max grid-cols-3 gap-1 overflow-y-auto rounded-md bg-black/60 p-1 backdrop-blur-sm"
         aria-label="Anatomy layers"
       >
         {ANATOMY_LAYERS.map((layer) => {
           const selected = selectedLayers.has(layer.id);
           return (
-            <button
+            <Card
               key={layer.id}
-              type="button"
-              aria-pressed={selected}
-              onClick={() => toggleLayer(layer.id)}
-              className={`flex min-h-6 items-center gap-2 rounded px-2 py-1 text-left text-[10px] transition-colors ${
+              className={cn(
+                "h-[76px] overflow-hidden rounded-md bg-black/30 shadow-none transition-colors",
                 selected
-                  ? "bg-white/10 text-white"
-                  : "text-white/45 hover:bg-white/5 hover:text-white/70"
-              }`}
+                  ? "border-white/40 bg-white/10"
+                  : "border-white/10",
+              )}
             >
-              <span
-                aria-hidden="true"
-                className={`size-2 shrink-0 rounded-[2px] border ${
+              <Button
+                type="button"
+                variant="ghost"
+                aria-pressed={selected}
+                onClick={() => toggleLayer(layer.id)}
+                className={cn(
+                  "h-full w-full flex-col gap-0 rounded-[5px] p-0.5 font-normal whitespace-normal",
                   selected
-                    ? "border-white bg-white"
-                    : "border-white/30 bg-transparent"
-                }`}
-              />
-              <span className="truncate">{layer.name}</span>
-            </button>
+                    ? "text-white hover:bg-white/5"
+                    : "text-white/55 hover:bg-white/5 hover:text-white/80",
+                )}
+              >
+                <img
+                  src={`/anatomy-layers/previews/${layer.id}.png`}
+                  alt=""
+                  draggable={false}
+                  className="h-12 min-h-0 w-full select-none object-contain"
+                />
+                <CardTitle className="line-clamp-2 flex min-h-5 w-full items-center justify-center px-0.5 text-center text-[9px] font-normal leading-[1.05]">
+                  {layer.name}
+                </CardTitle>
+              </Button>
+            </Card>
           );
         })}
       </div>
