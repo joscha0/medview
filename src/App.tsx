@@ -45,12 +45,15 @@ import {
   DicomMetadataOverlay,
   type DicomMetadata,
 } from "@/components/dicom-metadata-overlay";
+import { PanelResizeHandle } from "@/components/panel-resize-handle";
 
 const RENDERING_ENGINE_ID = "medview-rendering-engine";
 const VIEWPORT_ID = "medview-stack-viewport";
 const LOAD_TIMEOUT_MS = 30_000;
 const HEADER_READ_SIZE = 1024 * 1024;
 const HEADER_READER_COUNT = 4;
+const DEFAULT_ANATOMY_PANEL_SIZE = 35;
+const MIN_VIEWER_PANEL_HEIGHT = 140;
 const fileNameCollator = new Intl.Collator(undefined, {
   numeric: true,
   sensitivity: "base",
@@ -431,6 +434,7 @@ function App() {
   const loadGenerationRef = useRef(0);
   const navigationGenerationRef = useRef(0);
   const pendingImageIdsRef = useRef<string[]>([]);
+  const viewerPanelsRef = useRef<HTMLDivElement>(null);
 
   const [isReady, setIsReady] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -440,6 +444,9 @@ function App() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [imageCount, setImageCount] = useState(0);
   const [seriesFiles, setSeriesFiles] = useState<DicomFileInfo[]>([]);
+  const [anatomyPanelSize, setAnatomyPanelSize] = useState(
+    DEFAULT_ANATOMY_PANEL_SIZE,
+  );
   const slicePlane = useMemo(
     () => getDicomSlicePlane(seriesFiles, currentIndex),
     [currentIndex, seriesFiles],
@@ -668,18 +675,36 @@ function App() {
 
       <main className="relative flex min-h-0 flex-1">
         <section className="flex min-w-0 flex-1 flex-col">
-          <AnatomyViewer slicePlane={slicePlane} />
-
           <div
-            className="relative min-h-0 flex-1 overflow-hidden bg-black outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            onWheel={handleWheel}
-            onKeyDown={handleKeyDown}
-            tabIndex={0}
-            aria-label="DICOM image viewport. Use the mouse wheel or arrow keys to move through the series."
+            ref={viewerPanelsRef}
+            className="grid min-h-0 flex-1"
+            style={{
+              gridTemplateRows: `minmax(${MIN_VIEWER_PANEL_HEIGHT}px, ${anatomyPanelSize}fr) auto minmax(${MIN_VIEWER_PANEL_HEIGHT}px, ${100 - anatomyPanelSize}fr)`,
+            }}
           >
-            <div ref={viewportElementRef} className="absolute inset-0" />
+            <AnatomyViewer slicePlane={slicePlane} />
 
-            {!imageCount && !isLoading && (
+            <PanelResizeHandle
+              containerRef={viewerPanelsRef}
+              label="Resize anatomy and DICOM viewer panels"
+              minFirstSize={MIN_VIEWER_PANEL_HEIGHT}
+              minSecondSize={MIN_VIEWER_PANEL_HEIGHT}
+              orientation="horizontal"
+              value={anatomyPanelSize}
+              onChange={setAnatomyPanelSize}
+              onReset={() => setAnatomyPanelSize(DEFAULT_ANATOMY_PANEL_SIZE)}
+            />
+
+            <div
+              className="relative min-h-0 overflow-hidden bg-black outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onWheel={handleWheel}
+              onKeyDown={handleKeyDown}
+              tabIndex={0}
+              aria-label="DICOM image viewport. Use the mouse wheel or arrow keys to move through the series."
+            >
+              <div ref={viewportElementRef} className="absolute inset-0" />
+
+              {!imageCount && !isLoading && (
               <div className="pointer-events-none absolute inset-0 grid place-items-center p-6">
                 <div className="text-center">
                   <FileImage className="mx-auto size-7 text-muted-foreground" />
@@ -700,9 +725,9 @@ function App() {
                   )}
                 </div>
               </div>
-            )}
+              )}
 
-            {isLoading && (
+              {isLoading && (
               <div className="absolute inset-0 grid place-items-center bg-black/80">
                 <div className="text-center">
                   <Loader2 className="mx-auto size-5 animate-spin" />
@@ -711,24 +736,25 @@ function App() {
                   </p>
                 </div>
               </div>
-            )}
+              )}
 
-            {error && !isLoading && (
+              {error && !isLoading && (
               <Card className="absolute left-1/2 top-4 w-[min(28rem,calc(100%-2rem))] -translate-x-1/2 border-destructive/50 bg-background shadow-none">
                 <CardContent className="flex gap-2.5 p-3 text-sm">
                   <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
                   <p>{error}</p>
                 </CardContent>
               </Card>
-            )}
+              )}
 
-            {imageCount > 0 && (
+              {imageCount > 0 && (
               <DicomMetadataOverlay
                 metadata={seriesFiles[currentIndex]}
                 currentIndex={currentIndex}
                 imageCount={imageCount}
               />
-            )}
+              )}
+            </div>
           </div>
 
           <div className="flex h-16 shrink-0 items-center gap-3 border-t px-3 sm:px-4">

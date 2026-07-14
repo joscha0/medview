@@ -1,4 +1,5 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import { PanelResizeHandle } from "./panel-resize-handle";
 import { AnatomyCanvas } from "./anatomy/anatomy-canvas";
 import { AnatomyLayerPicker } from "./anatomy/anatomy-layer-picker";
 import {
@@ -12,6 +13,9 @@ export type { DicomSlicePlane } from "./anatomy/types";
 
 type ViewerStatus = "loading" | "ready" | "error";
 
+const DEFAULT_MODEL_PANEL_SIZE = 67;
+const MIN_ANATOMY_PANEL_WIDTH = 140;
+
 export function AnatomyViewer({
   slicePlane = null,
 }: {
@@ -22,6 +26,10 @@ export function AnatomyViewer({
   );
   const [selectedPart, setSelectedPart] = useState<string | null>(null);
   const [status, setStatus] = useState<ViewerStatus>("loading");
+  const [modelPanelSize, setModelPanelSize] = useState(
+    DEFAULT_MODEL_PANEL_SIZE,
+  );
+  const panelsRef = useRef<HTMLDivElement>(null);
 
   const handleReady = useCallback(() => setStatus("ready"), []);
   const handleError = useCallback(() => setStatus("error"), []);
@@ -38,7 +46,11 @@ export function AnatomyViewer({
 
   return (
     <div
-      className="relative flex h-[32svh] min-h-40 max-h-80 shrink-0 overflow-hidden border-b bg-black [&_canvas]:touch-none"
+      ref={panelsRef}
+      className="relative grid min-h-0 overflow-hidden bg-black [&_canvas]:touch-none"
+      style={{
+        gridTemplateColumns: `minmax(${MIN_ANATOMY_PANEL_WIDTH}px, ${modelPanelSize}fr) auto minmax(${MIN_ANATOMY_PANEL_WIDTH}px, ${100 - modelPanelSize}fr)`,
+      }}
       aria-label="Interactive 3D anatomy model and synchronized slice view."
     >
       <div className="relative min-w-0 flex-1">
@@ -74,8 +86,19 @@ export function AnatomyViewer({
         )}
       </div>
 
+      <PanelResizeHandle
+        containerRef={panelsRef}
+        label="Resize 3D model and 3D slice panels"
+        minFirstSize={MIN_ANATOMY_PANEL_WIDTH}
+        minSecondSize={MIN_ANATOMY_PANEL_WIDTH}
+        orientation="vertical"
+        value={modelPanelSize}
+        onChange={setModelPanelSize}
+        onReset={() => setModelPanelSize(DEFAULT_MODEL_PANEL_SIZE)}
+      />
+
       <div
-        className="relative w-1/3 min-w-0 border-l border-white/10 bg-black"
+        className="relative min-w-0 bg-black"
         aria-label="Sliced anatomy view"
       >
         {slicePlane ? (
