@@ -87,6 +87,7 @@ export function AnatomyCanvas({
   return (
     <ModelErrorBoundary onError={onError}>
       <Canvas
+        className="h-full w-full"
         camera={
           isSliceView
             ? { fov: 28, near: 0.01, far: 20, position: [0, 0, 3] }
@@ -142,4 +143,3 @@ export function AnatomyCanvas({
     </ModelErrorBoundary>
   );
 }
-

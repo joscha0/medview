@@ -1,3 +1,8 @@
+import { Info, X } from "lucide-react";
+import { useState } from "react";
+
+import { Button } from "@/components/ui/button";
+
 export type DicomMetadata = {
   patientName?: string;
   patientId?: string;
@@ -52,6 +57,7 @@ export function DicomMetadataOverlay({
   currentIndex,
   imageCount,
 }: DicomMetadataOverlayProps) {
+  const [isOpen, setIsOpen] = useState(true);
   const patientName = formatPatientName(metadata?.patientName);
   const patientDetails = joinMetadata([
     metadata?.patientId ? `ID ${metadata.patientId}` : undefined,
@@ -71,6 +77,21 @@ export function DicomMetadataOverlay({
     metadata?.seriesDescription ?? metadata?.studyDescription;
   const hasStudyContext =
     patientName || patientDetails || description || scanDetails;
+
+  if (!isOpen) {
+    return (
+      <Button
+        type="button"
+        variant="outline"
+        size="xs"
+        className="absolute right-3 top-3 z-10 border-white/15 bg-black/60 text-white/70 backdrop-blur-sm hover:bg-black/80 hover:text-white"
+        onClick={() => setIsOpen(true)}
+      >
+        <Info />
+        Metadata
+      </Button>
+    );
+  }
 
   return (
     <div className="pointer-events-none absolute inset-x-3 top-3 flex items-start justify-between gap-4 font-mono text-[11px] leading-4 text-white/70">
@@ -98,8 +119,20 @@ export function DicomMetadataOverlay({
       )}
 
       <div className="shrink-0 rounded bg-black/60 px-2 py-1.5 text-right tabular-nums backdrop-blur-sm">
-        <div className="text-white/90">
-          {currentIndex + 1} / {imageCount}
+        <div className="flex items-start justify-end gap-1.5">
+          <div className="text-white/90">
+            {currentIndex + 1} / {imageCount}
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="pointer-events-auto -mr-1 -mt-0.5 text-white/55 hover:bg-white/10 hover:text-white"
+            aria-label="Close DICOM metadata"
+            onClick={() => setIsOpen(false)}
+          >
+            <X />
+          </Button>
         </div>
         {metadata?.columns && metadata.rows && (
           <div>
