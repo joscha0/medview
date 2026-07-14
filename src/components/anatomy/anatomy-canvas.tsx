@@ -26,6 +26,7 @@ type AnatomyCanvasProps = {
 type ModelErrorBoundaryProps = {
   children: ReactNode;
   onError: () => void;
+  resetKey: string;
 };
 
 class ModelErrorBoundary extends Component<
@@ -40,6 +41,15 @@ class ModelErrorBoundary extends Component<
 
   componentDidCatch() {
     this.props.onError();
+  }
+
+  componentDidUpdate(previousProps: ModelErrorBoundaryProps) {
+    if (
+      this.state.hasError &&
+      previousProps.resetKey !== this.props.resetKey
+    ) {
+      this.setState({ hasError: false });
+    }
   }
 
   render() {
@@ -83,9 +93,10 @@ export function AnatomyCanvas({
   onError,
 }: AnatomyCanvasProps) {
   const isSliceView = viewMode === "slice";
+  const selectedLayerKey = [...selectedLayers].sort().join(",");
 
   return (
-    <ModelErrorBoundary onError={onError}>
+    <ModelErrorBoundary onError={onError} resetKey={selectedLayerKey}>
       <Canvas
         className="h-full w-full"
         camera={
