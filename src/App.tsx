@@ -674,7 +674,7 @@ function App() {
       />
 
       <main className="relative flex min-h-0 flex-1">
-        <section className="flex min-w-0 flex-1 flex-col">
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div
             ref={viewerPanelsRef}
             className="grid min-h-0 flex-1"

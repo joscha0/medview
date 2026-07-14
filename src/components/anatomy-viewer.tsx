@@ -47,13 +47,13 @@ export function AnatomyViewer({
   return (
     <div
       ref={panelsRef}
-      className="relative grid min-h-0 overflow-hidden bg-black [&_canvas]:touch-none"
+      className="relative grid h-full min-h-0 w-full overflow-hidden bg-black [&_canvas]:touch-none"
       style={{
         gridTemplateColumns: `minmax(${MIN_ANATOMY_PANEL_WIDTH}px, ${modelPanelSize}fr) auto minmax(${MIN_ANATOMY_PANEL_WIDTH}px, ${100 - modelPanelSize}fr)`,
       }}
       aria-label="Interactive 3D anatomy model and synchronized slice view."
     >
-      <div className="relative min-w-0 flex-1">
+      <div className="relative min-h-0 min-w-0 overflow-hidden">
         <AnatomyCanvas
           selectedLayers={selectedLayers}
           selectedPart={selectedPart}
@@ -98,7 +98,7 @@ export function AnatomyViewer({
       />
 
       <div
-        className="relative min-w-0 bg-black"
+        className="relative min-h-0 min-w-0 overflow-hidden bg-black"
         aria-label="Sliced anatomy view"
       >
         {slicePlane ? (
