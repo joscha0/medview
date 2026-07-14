@@ -1,0 +1,18 @@
+{
+  "name": "MedView",
+  "short_name": "MedView",
+  "description": "Local-first DICOM viewing with synchronized 3D anatomy.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
