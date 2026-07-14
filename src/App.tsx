@@ -41,6 +41,10 @@ import {
   AnatomyViewer,
   type DicomSlicePlane,
 } from "@/components/anatomy-viewer";
+import {
+  DicomMetadataOverlay,
+  type DicomMetadata,
+} from "@/components/dicom-metadata-overlay";
 
 const RENDERING_ENGINE_ID = "medview-rendering-engine";
 const VIEWPORT_ID = "medview-stack-viewport";
@@ -56,16 +60,10 @@ let initializationPromise: Promise<void> | undefined;
 
 type Vector3 = [number, number, number];
 
-type DicomFileInfo = {
+type DicomFileInfo = DicomMetadata & {
   file: File;
   imageOrientation?: [number, number, number, number, number, number];
   imagePosition?: Vector3;
-  pixelSpacing?: [number, number];
-  rows?: number;
-  columns?: number;
-  bodyPart?: string;
-  seriesDescription?: string;
-  studyDescription?: string;
   patientHeightMm?: number;
   instanceNumber?: number;
   seriesInstanceUid: string;
@@ -138,6 +136,13 @@ function parseNumberList(value: string | undefined, length: number) {
   return values;
 }
 
+function parseFirstNumber(value: string | undefined) {
+  const firstValue = value?.split("\\")[0].trim();
+  if (!firstValue) return undefined;
+  const number = Number(firstValue);
+  return Number.isFinite(number) ? number : undefined;
+}
+
 async function parseDicomHeader(file: File): Promise<DicomFileInfo> {
   function parse(blob: Blob): Promise<DataSet> {
     return blob.arrayBuffer().then((buffer) =>
@@ -180,8 +185,18 @@ async function parseDicomHeader(file: File): Promise<DicomFileInfo> {
   const rows = dataSet.uint16("x00280010");
   const columns = dataSet.uint16("x00280011");
   const bodyPart = dataSet.string("x00180015")?.trim();
+  const modality = dataSet.string("x00080060")?.trim();
+  const studyDate = dataSet.string("x00080020")?.trim();
   const seriesDescription = dataSet.string("x0008103e")?.trim();
   const studyDescription = dataSet.string("x00081030")?.trim();
+  const patientName = dataSet.string("x00100010")?.trim();
+  const patientId = dataSet.string("x00100020")?.trim();
+  const patientSex = dataSet.string("x00100040")?.trim();
+  const patientAge = dataSet.string("x00101010")?.trim();
+  const patientPosition = dataSet.string("x00185100")?.trim();
+  const sliceThicknessMm = parseFirstNumber(dataSet.string("x00180050"));
+  const windowCenter = parseFirstNumber(dataSet.string("x00281050"));
+  const windowWidth = parseFirstNumber(dataSet.string("x00281051"));
   const patientSizeMeters = Number(dataSet.string("x00101020"));
   const patientHeightMm =
     Number.isFinite(patientSizeMeters) && patientSizeMeters > 0
@@ -197,8 +212,18 @@ async function parseDicomHeader(file: File): Promise<DicomFileInfo> {
     rows,
     columns,
     bodyPart,
+    modality,
+    studyDate,
     seriesDescription,
     studyDescription,
+    patientName,
+    patientId,
+    patientSex,
+    patientAge,
+    patientPosition,
+    sliceThicknessMm,
+    windowCenter,
+    windowWidth,
     patientHeightMm,
     instanceNumber,
     seriesInstanceUid,
@@ -698,9 +723,11 @@ function App() {
             )}
 
             {imageCount > 0 && (
-              <div className="pointer-events-none absolute left-3 top-3 rounded bg-black/60 px-2 py-1 font-mono text-xs text-white/70">
-                {currentIndex + 1} / {imageCount}
-              </div>
+              <DicomMetadataOverlay
+                metadata={seriesFiles[currentIndex]}
+                currentIndex={currentIndex}
+                imageCount={imageCount}
+              />
             )}
           </div>
 
