@@ -1,4 +1,10 @@
-import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber";
+import {
+  Canvas,
+  useFrame,
+  useLoader,
+  useThree,
+  type ThreeEvent,
+} from "@react-three/fiber";
 import {
   Component,
   Suspense,
@@ -134,6 +140,9 @@ function cloneSceneMaterials(
     object.material = Array.isArray(object.material)
       ? clonedMaterials
       : clonedMaterials[0];
+    if (hideMuscleCoverings && clonedMaterials.every((material) => !material.visible)) {
+      object.visible = false;
+    }
   });
 
   return scene;
@@ -158,12 +167,95 @@ function applyClippingPlanes(
   });
 }
 
+function getAnatomyPartName(object: THREE.Object3D | null) {
+  let current = object;
+  while (current) {
+    const name = current.name.trim();
+    if (name && !/^(mesh|scene|auxscene)$/i.test(name)) return name;
+    current = current.parent;
+  }
+  return null;
+}
+
+function displayAnatomyPartName(name: string) {
+  return name
+    .replace(/\.[oe]\d*$/, "")
+    .replace(/\.r$/, " · right")
+    .replace(/\.l$/, " · left");
+}
+
+function SelectionOutline({
+  scene,
+  selectedPart,
+  clippingPlanes,
+}: {
+  scene: THREE.Object3D;
+  selectedPart: string | null;
+  clippingPlanes: THREE.Plane[] | null;
+}) {
+  const outlinedMeshes = useMemo(() => {
+    if (!selectedPart) return [];
+    scene.updateMatrixWorld(true);
+    const parentWorldInverse = scene.parent
+      ? scene.parent.matrixWorld.clone().invert()
+      : new THREE.Matrix4();
+    const matches: Array<{
+      geometry: THREE.BufferGeometry;
+      matrix: THREE.Matrix4;
+    }> = [];
+
+    scene.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      if (getAnatomyPartName(object) !== selectedPart) return;
+      const position = new THREE.Vector3();
+      const quaternion = new THREE.Quaternion();
+      const scale = new THREE.Vector3();
+      const localMatrix = parentWorldInverse.clone().multiply(object.matrixWorld);
+      localMatrix.decompose(position, quaternion, scale);
+      scale.multiplyScalar(1.035);
+      matches.push({
+        geometry: object.geometry,
+        matrix: new THREE.Matrix4().compose(position, quaternion, scale),
+      });
+    });
+
+    return matches;
+  }, [scene, selectedPart]);
+
+  const material = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({
+        color: "#ffff00",
+        side: THREE.BackSide,
+        depthWrite: false,
+        clippingPlanes,
+      }),
+    [clippingPlanes],
+  );
+
+  useEffect(() => () => material.dispose(), [material]);
+
+  return outlinedMeshes.map((mesh, index) => (
+    <mesh
+      key={`${selectedPart}-${index}`}
+      geometry={mesh.geometry}
+      material={material}
+      matrix={mesh.matrix}
+      matrixAutoUpdate={false}
+      raycast={() => null}
+      renderOrder={20}
+    />
+  ));
+}
+
 function LayerModel({
   url,
   clippingPlanes,
+  selectedPart,
 }: {
   url: string;
   clippingPlanes: THREE.Plane[] | null;
+  selectedPart: string | null;
 }) {
   const gltf = useAnatomyLayer(url);
   const scene = useMemo(
@@ -175,17 +267,30 @@ function LayerModel({
     applyClippingPlanes(scene, clippingPlanes);
   }, [clippingPlanes, scene]);
 
-  return <primitive object={scene} dispose={null} />;
+  return (
+    <>
+      <primitive object={scene} dispose={null} />
+      <SelectionOutline
+        scene={scene}
+        selectedPart={selectedPart}
+        clippingPlanes={clippingPlanes}
+      />
+    </>
+  );
 }
 
 function AnatomyModel({
   selectedLayers,
+  selectedPart,
   slicePlane,
+  onSelectPart,
   onReady,
   viewMode = "model",
 }: {
   selectedLayers: ReadonlySet<AnatomyLayerId>;
+  selectedPart: string | null;
   slicePlane: DicomSlicePlane | null;
+  onSelectPart: (part: string) => void;
   onReady?: () => void;
   viewMode?: "model" | "slice";
 }) {
@@ -238,9 +343,23 @@ function AnatomyModel({
 
   useEffect(() => onReady?.(), [onReady, selectionKey]);
 
+  const handlePartClick = useCallback(
+    (event: ThreeEvent<MouseEvent>) => {
+      const part = getAnatomyPartName(event.object);
+      if (!part) return;
+      event.stopPropagation();
+      onSelectPart(part);
+    },
+    [onSelectPart],
+  );
+
   return (
     <>
-      <group position={fittedModel.position} scale={fittedModel.scale}>
+      <group
+        position={fittedModel.position}
+        scale={fittedModel.scale}
+        onClick={handlePartClick}
+      >
         {ANATOMY_LAYERS.map((layer) => {
           if (!selectedLayers.has(layer.id)) return null;
           if (layer.id === DEFAULT_LAYER) {
@@ -257,9 +376,17 @@ function AnatomyModel({
               key={layer.id}
               url={layerUrl(layer.file)}
               clippingPlanes={clippingPlanes}
+              selectedPart={selectedPart}
             />
           );
         })}
+        {selectedLayers.has(DEFAULT_LAYER) && (
+          <SelectionOutline
+            scene={fittedModel.scene}
+            selectedPart={selectedPart}
+            clippingPlanes={clippingPlanes}
+          />
+        )}
       </group>
       {viewMode === "model" && sliceTransform && (
         <SlicePlaneIndicator
@@ -428,6 +555,7 @@ export function AnatomyViewer({
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     "loading",
   );
+  const [selectedPart, setSelectedPart] = useState<string | null>(null);
   const handleReady = useCallback(() => setStatus("ready"), []);
   const handleError = useCallback(() => setStatus("error"), []);
   const toggleLayer = useCallback((id: AnatomyLayerId) => {
@@ -442,7 +570,7 @@ export function AnatomyViewer({
 
   return (
     <div
-      className="flex h-[32svh] min-h-40 max-h-80 shrink-0 overflow-hidden border-b bg-black [&_canvas]:touch-none"
+      className="relative flex h-[32svh] min-h-40 max-h-80 shrink-0 overflow-hidden border-b bg-black [&_canvas]:touch-none"
       aria-label="Interactive 3D anatomy model and synchronized slice view."
     >
       <div className="relative min-w-0 flex-1">
@@ -456,6 +584,7 @@ export function AnatomyViewer({
             }}
             dpr={[1, 1.5]}
             gl={{ antialias: true }}
+            onPointerMissed={() => setSelectedPart(null)}
             onCreated={({ gl }) => {
               gl.outputColorSpace = THREE.SRGBColorSpace;
               gl.toneMapping = THREE.ACESFilmicToneMapping;
@@ -474,7 +603,9 @@ export function AnatomyViewer({
             <Suspense fallback={null}>
               <AnatomyModel
                 selectedLayers={selectedLayers}
+                selectedPart={selectedPart}
                 slicePlane={slicePlane}
+                onSelectPart={setSelectedPart}
                 onReady={handleReady}
               />
             </Suspense>
@@ -549,6 +680,7 @@ export function AnatomyViewer({
               camera={{ fov: 28, near: 0.01, far: 20, position: [0, 0, 3] }}
               dpr={[1, 1.5]}
               gl={{ antialias: true, localClippingEnabled: true }}
+              onPointerMissed={() => setSelectedPart(null)}
               onCreated={({ gl }) => {
                 gl.localClippingEnabled = true;
                 gl.outputColorSpace = THREE.SRGBColorSpace;
@@ -562,7 +694,9 @@ export function AnatomyViewer({
               <Suspense fallback={null}>
                 <AnatomyModel
                   selectedLayers={selectedLayers}
+                  selectedPart={selectedPart}
                   slicePlane={slicePlane}
+                  onSelectPart={setSelectedPart}
                   viewMode="slice"
                 />
               </Suspense>
@@ -577,6 +711,12 @@ export function AnatomyViewer({
           3D slice
         </div>
       </div>
+
+      {selectedPart && (
+        <div className="pointer-events-none absolute left-1/2 top-2 z-20 -translate-x-1/2 rounded-md border border-yellow-300/25 bg-black/75 px-2.5 py-1 text-[10px] text-yellow-100 shadow-sm backdrop-blur-sm">
+          {displayAnatomyPartName(selectedPart)}
+        </div>
+      )}
     </div>
   );
 }
