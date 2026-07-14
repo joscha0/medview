@@ -34,7 +34,7 @@ export function AnatomyLayerPicker({
 
   return (
     <div
-      className="absolute bottom-2 left-2 top-2 z-10 flex w-60 flex-col overflow-hidden rounded-md bg-black/60 backdrop-blur-sm"
+      className="absolute bottom-2 left-2 top-2 z-10 flex w-[min(20rem,calc(100%-1rem))] max-w-full flex-col overflow-hidden rounded-md bg-black/60 backdrop-blur-sm"
       aria-label="Anatomy layers"
     >
       <div className="flex h-8 shrink-0 items-center justify-between px-2 text-[10px] font-medium text-white/65">
@@ -51,14 +51,19 @@ export function AnatomyLayerPicker({
         </Button>
       </div>
 
-      <div className="grid min-h-0 flex-1 auto-rows-max grid-cols-3 gap-1 overflow-y-auto p-1 pt-0">
+      <div
+        className="grid min-h-0 flex-1 auto-rows-max gap-1 overflow-y-auto p-1 pt-0"
+        style={{
+          gridTemplateColumns: "repeat(auto-fit, minmax(5rem, 1fr))",
+        }}
+      >
         {ANATOMY_LAYERS.map((layer) => {
           const selected = selectedLayers.has(layer.id);
           return (
             <Card
               key={layer.id}
               className={cn(
-                "h-[76px] overflow-hidden rounded-md bg-black/30 shadow-none transition-colors",
+                "h-[76px] min-w-0 overflow-hidden rounded-md bg-black/30 shadow-none transition-colors",
                 selected ? "border-white/40 bg-white/10" : "border-white/10",
               )}
             >
@@ -68,7 +73,7 @@ export function AnatomyLayerPicker({
                 aria-pressed={selected}
                 onClick={() => onToggleLayer(layer.id)}
                 className={cn(
-                  "h-full w-full flex-col gap-0 rounded-[5px] p-0.5 font-normal whitespace-normal",
+                  "h-full min-w-0 w-full flex-col gap-0 rounded-[5px] p-0.5 font-normal whitespace-normal",
                   selected
                     ? "text-white hover:bg-white/5"
                     : "text-white/55 hover:bg-white/5 hover:text-white/80",
@@ -80,7 +85,7 @@ export function AnatomyLayerPicker({
                   draggable={false}
                   className="h-12 min-h-0 w-full select-none object-contain"
                 />
-                <CardTitle className="line-clamp-2 flex min-h-5 w-full items-center justify-center px-0.5 text-center text-[9px] font-normal leading-[1.05]">
+                <CardTitle className="line-clamp-2 flex min-h-5 min-w-0 w-full items-center justify-center break-words px-0.5 text-center text-[9px] font-normal leading-[1.05] [overflow-wrap:anywhere]">
                   {layer.name}
                 </CardTitle>
               </Button>
