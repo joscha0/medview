@@ -1,75 +1,36 @@
-# React + TypeScript + Vite
+# MedView
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+MedView is a browser-based DICOM viewer that pairs medical image stacks with
+an interactive, layered 3D anatomy model.
 
-Currently, two official plugins are available:
+## 3D anatomy model attribution
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+The anatomy model is adapted from:
 
-## React Compiler
+- **Z-Anatomy – The libre 3D atlas of anatomy**, by the Z-Anatomy
+  contributors, licensed under
+  [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+  [Source repository](https://github.com/Z-Anatomy/Models-of-human-anatomy)
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **BodyParts3D – The Database Center for Life Science**, the original model
+  underlying Z-Anatomy, licensed under CC BY-SA 2.1 Japan.
+  [Original source](https://dbarchive.biosciencedbc.jp/en/bodyparts3d/download.html)
 
-## Expanding the ESLint configuration
+Modifications: converted and optimized for browser rendering, divided into
+anatomical layers, and exported as GLB assets.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+The modified anatomy model assets are distributed under CC BY-SA 4.0.
+See the [upstream attribution and license](https://github.com/Z-Anatomy/Models-of-human-anatomy/blob/master/License.txt).
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+## Example Series Sources
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+### UPENN-GBM-00630
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Bakas, S., Sako, C., Akbari, H., Bilello, M., Sotiras, A., Shukla, G., Rudie, J. D., Flores Santamaria, N., Fathi Kazerooni, A., Pati, S., Rathore, S., Mamourian, E., Ha, S. M., Parker, W., Doshi, J., Baid, U., Bergman, M., Binder, Z. A., Verma, R., … Davatzikos, C. (2021). Multi-parametric magnetic resonance imaging (mpMRI) scans for de novo Glioblastoma (GBM) patients from the University of Pennsylvania Health System (UPENN-GBM) (Version 2) [Data set]. The Cancer Imaging Archive. https://doi.org/10.7937/TCIA.709X-DN49
 
-```
+### COVID-19-AR-16406488
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
-```
+Desai, S., Baghal, A., Wongsurawat, T., Al-Shukri, S., Gates, K., Farmer, P., Rutherford, M., Blake,
+G. D., Nolan, T., Powell, T., Sexton, K., Bennett, W., &amp; Prior, F. (2020). <i>Chest Imaging with
+Clinical and Genomic Correlates Representing a Rural COVID-19 Positive Population</i> (Version 1)
+[Data set]. The Cancer Imaging Archive. https://doi.org/10.7937/TCIA.2020.PY71-5978

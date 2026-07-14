@@ -4,6 +4,7 @@ import {
   imageLoader,
   RenderingEngine,
   StackViewport,
+  utilities,
   init as initCornerstoneCore,
 } from "@cornerstonejs/core";
 import {
@@ -46,11 +47,16 @@ import {
   type DicomMetadata,
 } from "@/components/dicom-metadata-overlay";
 import { PanelResizeHandle } from "@/components/panel-resize-handle";
+import {
+  SeriesPicker,
+  type SeriesPickerItem,
+} from "@/components/series-picker";
 
 const RENDERING_ENGINE_ID = "medview-rendering-engine";
 const VIEWPORT_ID = "medview-stack-viewport";
 const LOAD_TIMEOUT_MS = 30_000;
 const HEADER_READ_SIZE = 1024 * 1024;
+const EXAMPLE_HEADER_READ_SIZE = 64 * 1024;
 const HEADER_READER_COUNT = 4;
 const DEFAULT_ANATOMY_PANEL_SIZE = 35;
 const MIN_VIEWER_PANEL_HEIGHT = 140;
@@ -70,6 +76,26 @@ type DicomFileInfo = DicomMetadata & {
   patientHeightMm?: number;
   instanceNumber?: number;
   seriesInstanceUid: string;
+};
+
+type DicomSeries = SeriesPickerItem & {
+  files: DicomFileInfo[];
+  imageIds: string[];
+  currentIndex: number;
+  seriesInstanceUid: string;
+};
+
+type ExampleSeriesManifest = {
+  series: Array<{
+    directory: string;
+    files: string[];
+    label: string;
+  }>;
+};
+
+type ExampleDicomFile = {
+  info: DicomFileInfo;
+  url: string;
 };
 
 function initializeCornerstone() {
@@ -255,6 +281,79 @@ async function readDicomHeaders(files: File[]) {
   return results;
 }
 
+function getExampleFileUrl(directory: string, fileName: string) {
+  const relativePath = [
+    "example-series",
+    encodeURIComponent(directory),
+    encodeURIComponent(fileName),
+  ].join("/");
+  return new URL(`${import.meta.env.BASE_URL}${relativePath}`, document.baseURI)
+    .href;
+}
+
+async function readExampleDicomHeader(
+  directory: string,
+  fileName: string,
+  signal: AbortSignal,
+): Promise<ExampleDicomFile> {
+  const url = getExampleFileUrl(directory, fileName);
+
+  async function fetchFile(useRange: boolean) {
+    const response = await fetch(url, {
+      headers: useRange
+        ? { Range: `bytes=0-${EXAMPLE_HEADER_READ_SIZE - 1}` }
+        : undefined,
+      signal,
+    });
+    if (!response.ok) {
+      throw new Error(`Could not load example file ${fileName}.`);
+    }
+
+    return {
+      file: new File([await response.blob()], fileName),
+      isPartial: response.status === 206,
+    };
+  }
+
+  const header = await fetchFile(true);
+  try {
+    return { info: await parseDicomHeader(header.file), url };
+  } catch (headerError) {
+    if (!header.isPartial) throw headerError;
+    const fullFile = await fetchFile(false);
+    return { info: await parseDicomHeader(fullFile.file), url };
+  }
+}
+
+async function readExampleDicomHeaders(
+  entry: ExampleSeriesManifest["series"][number],
+  signal: AbortSignal,
+) {
+  const results = new Array<ExampleDicomFile>(entry.files.length);
+  let nextIndex = 0;
+
+  async function readNext() {
+    while (nextIndex < entry.files.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await readExampleDicomHeader(
+        entry.directory,
+        entry.files[index],
+        signal,
+      );
+    }
+  }
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(HEADER_READER_COUNT, entry.files.length) },
+      readNext,
+    ),
+  );
+
+  return results;
+}
+
 function getSliceNormal(
   orientation: DicomFileInfo["imageOrientation"],
 ): Vector3 | undefined {
@@ -415,6 +514,17 @@ function releaseImageIds(imageIds: string[], removeFiles = true) {
   });
 }
 
+async function createSeriesThumbnail(
+  image: Awaited<ReturnType<typeof imageLoader.loadAndCacheImage>>,
+  modality?: string,
+) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 240;
+  canvas.height = 180;
+  await utilities.renderToCanvasCPU(canvas, image, modality);
+  return canvas.toDataURL("image/jpeg", 0.82);
+}
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (error && typeof error === "object" && "error" in error) {
@@ -435,6 +545,9 @@ function App() {
   const navigationGenerationRef = useRef(0);
   const pendingImageIdsRef = useRef<string[]>([]);
   const viewerPanelsRef = useRef<HTMLDivElement>(null);
+  const seriesListRef = useRef<DicomSeries[]>([]);
+  const activeSeriesIdRef = useRef<string | null>(null);
+  const nextSeriesIdRef = useRef(0);
 
   const [isReady, setIsReady] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -444,6 +557,9 @@ function App() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [imageCount, setImageCount] = useState(0);
   const [seriesFiles, setSeriesFiles] = useState<DicomFileInfo[]>([]);
+  const [seriesList, setSeriesList] = useState<DicomSeries[]>([]);
+  const [activeSeriesId, setActiveSeriesId] = useState<string | null>(null);
+  const [isLoadingExamples, setIsLoadingExamples] = useState(false);
   const [anatomyPanelSize, setAnatomyPanelSize] = useState(
     DEFAULT_ANATOMY_PANEL_SIZE,
   );
@@ -490,11 +606,146 @@ function App() {
       renderingEngineRef.current?.destroy();
       renderingEngineRef.current = null;
       releaseImageIds(pendingImageIdsRef.current);
-      releaseImageIds(imageIdsRef.current);
+      seriesListRef.current.forEach((series) =>
+        releaseImageIds(series.imageIds),
+      );
       pendingImageIdsRef.current = [];
       imageIdsRef.current = [];
+      seriesListRef.current = [];
     };
   }, []);
+
+  useEffect(() => {
+    if (!isReady) return;
+
+    const abortController = new AbortController();
+    const pendingExampleImageIds = new Set<string>();
+    let cancelled = false;
+
+    async function loadExampleSeries(
+      entry: ExampleSeriesManifest["series"][number],
+    ): Promise<DicomSeries> {
+      let imageIds: string[] = [];
+
+      try {
+        const exampleFiles = await readExampleDicomHeaders(
+          entry,
+          abortController.signal,
+        );
+        const seriesInstanceUids = new Set(
+          exampleFiles.map((item) => item.info.seriesInstanceUid),
+        );
+        if (seriesInstanceUids.size !== 1) {
+          throw new Error(`${entry.label} contains more than one DICOM series.`);
+        }
+
+        const urlByFileName = new Map(
+          exampleFiles.map((item) => [item.info.file.name, item.url]),
+        );
+        const sortedDicomFiles = sortDicomFiles(
+          exampleFiles.map((item) => item.info),
+        );
+        imageIds = sortedDicomFiles.map((item) => {
+          const url = urlByFileName.get(item.file.name);
+          if (!url) throw new Error(`Missing example file ${item.file.name}.`);
+          return `wadouri:${url}`;
+        });
+        imageIds.forEach((imageId) => pendingExampleImageIds.add(imageId));
+
+        const initialIndex = Math.floor(imageIds.length / 2);
+        const middleImage = await withTimeout(
+          imageLoader.loadAndCacheImage(imageIds[initialIndex]),
+          `${entry.label} took too long to decode.`,
+          () => releaseImageIds(imageIds),
+        );
+        const thumbnailUrl = await createSeriesThumbnail(
+          middleImage,
+          sortedDicomFiles[initialIndex]?.modality,
+        );
+        const firstFile = sortedDicomFiles[0];
+
+        return {
+          id: `example-${firstFile.seriesInstanceUid}`,
+          files: sortedDicomFiles,
+          imageIds,
+          currentIndex: initialIndex,
+          imageCount: imageIds.length,
+          isExample: true,
+          label:
+            firstFile.seriesDescription ||
+            firstFile.studyDescription ||
+            entry.label,
+          modality: firstFile.modality,
+          seriesInstanceUid: firstFile.seriesInstanceUid,
+          thumbnailUrl,
+        };
+      } catch (exampleError) {
+        releaseImageIds(imageIds);
+        throw exampleError;
+      }
+    }
+
+    async function loadExamples() {
+      setIsLoadingExamples(true);
+
+      try {
+        const manifestUrl = new URL(
+          `${import.meta.env.BASE_URL}example-series/manifest.json`,
+          document.baseURI,
+        );
+        const response = await fetch(manifestUrl, {
+          signal: abortController.signal,
+        });
+        if (!response.ok) throw new Error("Example manifest could not be loaded.");
+
+        const manifest = (await response.json()) as ExampleSeriesManifest;
+        const results = await Promise.allSettled(
+          manifest.series.map(loadExampleSeries),
+        );
+        const examples = results.flatMap((result) =>
+          result.status === "fulfilled" ? [result.value] : [],
+        );
+
+        if (cancelled) {
+          examples.forEach((series) => releaseImageIds(series.imageIds));
+          return;
+        }
+        if (!examples.length) {
+          throw new Error("The bundled example series could not be loaded.");
+        }
+
+        const exampleIds = new Set(examples.map((series) => series.id));
+        const nextSeriesList = [
+          ...examples,
+          ...seriesListRef.current.filter(
+            (series) => !exampleIds.has(series.id),
+          ),
+        ];
+        examples.forEach((series) =>
+          series.imageIds.forEach((imageId) =>
+            pendingExampleImageIds.delete(imageId),
+          ),
+        );
+        seriesListRef.current = nextSeriesList;
+        setSeriesList(nextSeriesList);
+      } catch (exampleError) {
+        if (!cancelled && !(exampleError instanceof DOMException)) {
+          setError(getErrorMessage(exampleError));
+        }
+      } finally {
+        if (!cancelled) setIsLoadingExamples(false);
+      }
+    }
+
+    void loadExamples();
+
+    return () => {
+      cancelled = true;
+      abortController.abort();
+      releaseImageIds([...pendingExampleImageIds]);
+      pendingExampleImageIds.clear();
+    };
+  }, [isReady]);
 
   const goToImage = useCallback((nextIndex: number) => {
     const renderingEngine = renderingEngineRef.current;
@@ -507,6 +758,10 @@ function App() {
     const previousIndex = currentIndexRef.current;
     const navigationGeneration = ++navigationGenerationRef.current;
     currentIndexRef.current = safeIndex;
+    const activeSeries = seriesListRef.current.find(
+      (series) => series.id === activeSeriesIdRef.current,
+    );
+    if (activeSeries) activeSeries.currentIndex = safeIndex;
     setCurrentIndex(safeIndex);
     setError(null);
 
@@ -518,9 +773,51 @@ function App() {
     ).catch((navigationError: unknown) => {
       if (navigationGeneration !== navigationGenerationRef.current) return;
       currentIndexRef.current = previousIndex;
+      if (activeSeries) activeSeries.currentIndex = previousIndex;
       setCurrentIndex(previousIndex);
       setError(getErrorMessage(navigationError));
     });
+  }, []);
+
+  const selectSeries = useCallback(async (seriesId: string) => {
+    if (seriesId === activeSeriesIdRef.current) return;
+
+    const series = seriesListRef.current.find((item) => item.id === seriesId);
+    const renderingEngine = renderingEngineRef.current;
+    if (!series || !renderingEngine) return;
+
+    const generation = ++loadGenerationRef.current;
+    navigationGenerationRef.current += 1;
+    releaseImageIds(pendingImageIdsRef.current);
+    pendingImageIdsRef.current = [];
+    setIsLoading(true);
+    setLoadingMessage("Displaying series…");
+    setError(null);
+
+    try {
+      const viewport = renderingEngine.getViewport<StackViewport>(VIEWPORT_ID);
+      await withTimeout(
+        viewport.setStack(series.imageIds, series.currentIndex),
+        "The selected series could not be displayed in time.",
+        () => removeCachedImage(series.imageIds[series.currentIndex]),
+      );
+      if (generation !== loadGenerationRef.current) return;
+
+      viewport.render();
+      activeSeriesIdRef.current = series.id;
+      imageIdsRef.current = series.imageIds;
+      currentIndexRef.current = series.currentIndex;
+      setActiveSeriesId(series.id);
+      setCurrentIndex(series.currentIndex);
+      setImageCount(series.imageIds.length);
+      setSeriesFiles(series.files);
+    } catch (selectionError) {
+      if (generation === loadGenerationRef.current) {
+        setError(getErrorMessage(selectionError));
+      }
+    } finally {
+      if (generation === loadGenerationRef.current) setIsLoading(false);
+    }
   }, []);
 
   const openFiles = useCallback(async (files: File[]) => {
@@ -565,10 +862,19 @@ function App() {
       const initialIndex = Math.floor(candidateImageIds.length / 2);
 
       setLoadingMessage("Decoding first image…");
-      await withTimeout(
+      const middleImage = await withTimeout(
         imageLoader.loadAndCacheImage(candidateImageIds[initialIndex]),
         "The first image took too long to decode. Check that the files contain DICOM pixel data.",
         () => releaseImageIds(candidateImageIds),
+      );
+      if (generation !== loadGenerationRef.current) {
+        releaseImageIds(candidateImageIds);
+        return;
+      }
+
+      const thumbnailUrl = await createSeriesThumbnail(
+        middleImage,
+        sortedDicomFiles[initialIndex]?.modality,
       );
       if (generation !== loadGenerationRef.current) {
         releaseImageIds(candidateImageIds);
@@ -588,14 +894,32 @@ function App() {
       }
 
       viewport.render();
-      const previousImageIds = imageIdsRef.current;
+      const firstFile = sortedDicomFiles[0];
+      const newSeries: DicomSeries = {
+        id: `${firstFile.seriesInstanceUid}-${++nextSeriesIdRef.current}`,
+        files: sortedDicomFiles,
+        imageIds: candidateImageIds,
+        currentIndex: initialIndex,
+        imageCount: candidateImageIds.length,
+        label:
+          firstFile.seriesDescription ||
+          firstFile.studyDescription ||
+          `Series ${seriesListRef.current.length + 1}`,
+        modality: firstFile.modality,
+        seriesInstanceUid: firstFile.seriesInstanceUid,
+        thumbnailUrl,
+      };
+      const nextSeriesList = [...seriesListRef.current, newSeries];
+      seriesListRef.current = nextSeriesList;
       imageIdsRef.current = candidateImageIds;
       pendingImageIdsRef.current = [];
+      activeSeriesIdRef.current = newSeries.id;
       currentIndexRef.current = initialIndex;
+      setSeriesList(nextSeriesList);
+      setActiveSeriesId(newSeries.id);
       setCurrentIndex(initialIndex);
       setImageCount(candidateImageIds.length);
       setSeriesFiles(sortedDicomFiles);
-      releaseImageIds(previousImageIds);
     } catch (loadError) {
       if (generation !== loadGenerationRef.current) {
         releaseImageIds(candidateImageIds);
@@ -674,6 +998,15 @@ function App() {
       />
 
       <main className="relative flex min-h-0 flex-1">
+        <SeriesPicker
+          activeSeriesId={activeSeriesId}
+          disabled={!isReady || isLoading}
+          isLoadingExamples={isLoadingExamples}
+          series={seriesList}
+          onAdd={() => fileInputRef.current?.click()}
+          onSelect={(seriesId) => void selectSeries(seriesId)}
+        />
+
         <section className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div
             ref={viewerPanelsRef}
@@ -696,7 +1029,7 @@ function App() {
             />
 
             <div
-              className="relative min-h-0 overflow-hidden bg-black outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="relative min-h-0 min-w-0 overflow-hidden bg-black outline-none focus-visible:ring-2 focus-visible:ring-ring"
               onWheel={handleWheel}
               onKeyDown={handleKeyDown}
               tabIndex={0}
@@ -704,56 +1037,56 @@ function App() {
             >
               <div ref={viewportElementRef} className="absolute inset-0" />
 
-              {!imageCount && !isLoading && (
-              <div className="pointer-events-none absolute inset-0 grid place-items-center p-6">
-                <div className="text-center">
-                  <FileImage className="mx-auto size-7 text-muted-foreground" />
-                  <p className="mt-3 text-sm text-muted-foreground">
-                    {isReady
-                      ? "Drop a DICOM series to begin"
-                      : "Starting viewer…"}
-                  </p>
-                  {isReady && (
-                    <Button
-                      className="pointer-events-auto mt-4"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      Choose files
-                    </Button>
-                  )}
-                </div>
-              </div>
-              )}
+                {!imageCount && !isLoading && (
+                  <div className="pointer-events-none absolute inset-0 grid place-items-center p-6">
+                    <div className="text-center">
+                      <FileImage className="mx-auto size-7 text-muted-foreground" />
+                      <p className="mt-3 text-sm text-muted-foreground">
+                        {isReady
+                          ? "Drop a DICOM series to begin"
+                          : "Starting viewer…"}
+                      </p>
+                      {isReady && (
+                        <Button
+                          className="pointer-events-auto mt-4"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => fileInputRef.current?.click()}
+                        >
+                          Choose files
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )}
 
-              {isLoading && (
-              <div className="absolute inset-0 grid place-items-center bg-black/80">
-                <div className="text-center">
-                  <Loader2 className="mx-auto size-5 animate-spin" />
-                  <p className="mt-3 text-sm text-muted-foreground">
-                    {loadingMessage}
-                  </p>
-                </div>
-              </div>
-              )}
+                {isLoading && (
+                  <div className="absolute inset-0 grid place-items-center bg-black/80">
+                    <div className="text-center">
+                      <Loader2 className="mx-auto size-5 animate-spin" />
+                      <p className="mt-3 text-sm text-muted-foreground">
+                        {loadingMessage}
+                      </p>
+                    </div>
+                  </div>
+                )}
 
-              {error && !isLoading && (
-              <Card className="absolute left-1/2 top-4 w-[min(28rem,calc(100%-2rem))] -translate-x-1/2 border-destructive/50 bg-background shadow-none">
-                <CardContent className="flex gap-2.5 p-3 text-sm">
-                  <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
-                  <p>{error}</p>
-                </CardContent>
-              </Card>
-              )}
+                {error && !isLoading && (
+                  <Card className="absolute left-1/2 top-4 w-[min(28rem,calc(100%-2rem))] -translate-x-1/2 border-destructive/50 bg-background shadow-none">
+                    <CardContent className="flex gap-2.5 p-3 text-sm">
+                      <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
+                      <p>{error}</p>
+                    </CardContent>
+                  </Card>
+                )}
 
-              {imageCount > 0 && (
-              <DicomMetadataOverlay
-                metadata={seriesFiles[currentIndex]}
-                currentIndex={currentIndex}
-                imageCount={imageCount}
-              />
-              )}
+                {imageCount > 0 && (
+                  <DicomMetadataOverlay
+                    metadata={seriesFiles[currentIndex]}
+                    currentIndex={currentIndex}
+                    imageCount={imageCount}
+                  />
+                )}
             </div>
           </div>
 
