@@ -1,4 +1,4 @@
-import { FileImage, Plus } from "lucide-react";
+import { FileImage, Loader2, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -9,11 +9,13 @@ export type SeriesPickerItem = {
   label: string;
   modality?: string;
   thumbnailUrl?: string;
+  isExample?: boolean;
 };
 
 type SeriesPickerProps = {
   activeSeriesId: string | null;
   disabled?: boolean;
+  isLoadingExamples?: boolean;
   series: SeriesPickerItem[];
   onAdd: () => void;
   onSelect: (seriesId: string) => void;
@@ -22,6 +24,7 @@ type SeriesPickerProps = {
 export function SeriesPicker({
   activeSeriesId,
   disabled,
+  isLoadingExamples,
   series,
   onAdd,
   onSelect,
@@ -81,6 +84,11 @@ export function SeriesPicker({
                 <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-white/80">
                   {item.imageCount}
                 </span>
+                {item.isExample && (
+                  <span className="absolute left-1 top-1 rounded bg-primary px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-primary-foreground">
+                    Example
+                  </span>
+                )}
               </div>
 
               <div className="min-w-0 px-2 py-1.5">
@@ -94,7 +102,14 @@ export function SeriesPicker({
           );
         })}
 
-        {!series.length && (
+        {isLoadingExamples && (
+          <div className="flex items-center gap-2 rounded-md border border-dashed px-2.5 py-3 text-[11px] text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" />
+            Loading examples…
+          </div>
+        )}
+
+        {!series.length && !isLoadingExamples && (
           <button
             type="button"
             className="grid w-full place-items-center rounded-md border border-dashed px-3 py-8 text-center text-xs text-muted-foreground outline-none transition-colors hover:border-foreground/25 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"

@@ -56,6 +56,7 @@ const RENDERING_ENGINE_ID = "medview-rendering-engine";
 const VIEWPORT_ID = "medview-stack-viewport";
 const LOAD_TIMEOUT_MS = 30_000;
 const HEADER_READ_SIZE = 1024 * 1024;
+const EXAMPLE_HEADER_READ_SIZE = 64 * 1024;
 const HEADER_READER_COUNT = 4;
 const DEFAULT_ANATOMY_PANEL_SIZE = 35;
 const MIN_VIEWER_PANEL_HEIGHT = 140;
@@ -82,6 +83,19 @@ type DicomSeries = SeriesPickerItem & {
   imageIds: string[];
   currentIndex: number;
   seriesInstanceUid: string;
+};
+
+type ExampleSeriesManifest = {
+  series: Array<{
+    directory: string;
+    files: string[];
+    label: string;
+  }>;
+};
+
+type ExampleDicomFile = {
+  info: DicomFileInfo;
+  url: string;
 };
 
 function initializeCornerstone() {
@@ -260,6 +274,79 @@ async function readDicomHeaders(files: File[]) {
   await Promise.all(
     Array.from(
       { length: Math.min(HEADER_READER_COUNT, files.length) },
+      readNext,
+    ),
+  );
+
+  return results;
+}
+
+function getExampleFileUrl(directory: string, fileName: string) {
+  const relativePath = [
+    "example-series",
+    encodeURIComponent(directory),
+    encodeURIComponent(fileName),
+  ].join("/");
+  return new URL(`${import.meta.env.BASE_URL}${relativePath}`, document.baseURI)
+    .href;
+}
+
+async function readExampleDicomHeader(
+  directory: string,
+  fileName: string,
+  signal: AbortSignal,
+): Promise<ExampleDicomFile> {
+  const url = getExampleFileUrl(directory, fileName);
+
+  async function fetchFile(useRange: boolean) {
+    const response = await fetch(url, {
+      headers: useRange
+        ? { Range: `bytes=0-${EXAMPLE_HEADER_READ_SIZE - 1}` }
+        : undefined,
+      signal,
+    });
+    if (!response.ok) {
+      throw new Error(`Could not load example file ${fileName}.`);
+    }
+
+    return {
+      file: new File([await response.blob()], fileName),
+      isPartial: response.status === 206,
+    };
+  }
+
+  const header = await fetchFile(true);
+  try {
+    return { info: await parseDicomHeader(header.file), url };
+  } catch (headerError) {
+    if (!header.isPartial) throw headerError;
+    const fullFile = await fetchFile(false);
+    return { info: await parseDicomHeader(fullFile.file), url };
+  }
+}
+
+async function readExampleDicomHeaders(
+  entry: ExampleSeriesManifest["series"][number],
+  signal: AbortSignal,
+) {
+  const results = new Array<ExampleDicomFile>(entry.files.length);
+  let nextIndex = 0;
+
+  async function readNext() {
+    while (nextIndex < entry.files.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await readExampleDicomHeader(
+        entry.directory,
+        entry.files[index],
+        signal,
+      );
+    }
+  }
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(HEADER_READER_COUNT, entry.files.length) },
       readNext,
     ),
   );
@@ -472,6 +559,7 @@ function App() {
   const [seriesFiles, setSeriesFiles] = useState<DicomFileInfo[]>([]);
   const [seriesList, setSeriesList] = useState<DicomSeries[]>([]);
   const [activeSeriesId, setActiveSeriesId] = useState<string | null>(null);
+  const [isLoadingExamples, setIsLoadingExamples] = useState(false);
   const [anatomyPanelSize, setAnatomyPanelSize] = useState(
     DEFAULT_ANATOMY_PANEL_SIZE,
   );
@@ -526,6 +614,138 @@ function App() {
       seriesListRef.current = [];
     };
   }, []);
+
+  useEffect(() => {
+    if (!isReady) return;
+
+    const abortController = new AbortController();
+    const pendingExampleImageIds = new Set<string>();
+    let cancelled = false;
+
+    async function loadExampleSeries(
+      entry: ExampleSeriesManifest["series"][number],
+    ): Promise<DicomSeries> {
+      let imageIds: string[] = [];
+
+      try {
+        const exampleFiles = await readExampleDicomHeaders(
+          entry,
+          abortController.signal,
+        );
+        const seriesInstanceUids = new Set(
+          exampleFiles.map((item) => item.info.seriesInstanceUid),
+        );
+        if (seriesInstanceUids.size !== 1) {
+          throw new Error(`${entry.label} contains more than one DICOM series.`);
+        }
+
+        const urlByFileName = new Map(
+          exampleFiles.map((item) => [item.info.file.name, item.url]),
+        );
+        const sortedDicomFiles = sortDicomFiles(
+          exampleFiles.map((item) => item.info),
+        );
+        imageIds = sortedDicomFiles.map((item) => {
+          const url = urlByFileName.get(item.file.name);
+          if (!url) throw new Error(`Missing example file ${item.file.name}.`);
+          return `wadouri:${url}`;
+        });
+        imageIds.forEach((imageId) => pendingExampleImageIds.add(imageId));
+
+        const initialIndex = Math.floor(imageIds.length / 2);
+        const middleImage = await withTimeout(
+          imageLoader.loadAndCacheImage(imageIds[initialIndex]),
+          `${entry.label} took too long to decode.`,
+          () => releaseImageIds(imageIds),
+        );
+        const thumbnailUrl = await createSeriesThumbnail(
+          middleImage,
+          sortedDicomFiles[initialIndex]?.modality,
+        );
+        const firstFile = sortedDicomFiles[0];
+
+        return {
+          id: `example-${firstFile.seriesInstanceUid}`,
+          files: sortedDicomFiles,
+          imageIds,
+          currentIndex: initialIndex,
+          imageCount: imageIds.length,
+          isExample: true,
+          label:
+            firstFile.seriesDescription ||
+            firstFile.studyDescription ||
+            entry.label,
+          modality: firstFile.modality,
+          seriesInstanceUid: firstFile.seriesInstanceUid,
+          thumbnailUrl,
+        };
+      } catch (exampleError) {
+        releaseImageIds(imageIds);
+        throw exampleError;
+      }
+    }
+
+    async function loadExamples() {
+      setIsLoadingExamples(true);
+
+      try {
+        const manifestUrl = new URL(
+          `${import.meta.env.BASE_URL}example-series/manifest.json`,
+          document.baseURI,
+        );
+        const response = await fetch(manifestUrl, {
+          signal: abortController.signal,
+        });
+        if (!response.ok) throw new Error("Example manifest could not be loaded.");
+
+        const manifest = (await response.json()) as ExampleSeriesManifest;
+        const results = await Promise.allSettled(
+          manifest.series.map(loadExampleSeries),
+        );
+        const examples = results.flatMap((result) =>
+          result.status === "fulfilled" ? [result.value] : [],
+        );
+
+        if (cancelled) {
+          examples.forEach((series) => releaseImageIds(series.imageIds));
+          return;
+        }
+        if (!examples.length) {
+          throw new Error("The bundled example series could not be loaded.");
+        }
+
+        const exampleIds = new Set(examples.map((series) => series.id));
+        const nextSeriesList = [
+          ...examples,
+          ...seriesListRef.current.filter(
+            (series) => !exampleIds.has(series.id),
+          ),
+        ];
+        examples.forEach((series) =>
+          series.imageIds.forEach((imageId) =>
+            pendingExampleImageIds.delete(imageId),
+          ),
+        );
+        seriesListRef.current = nextSeriesList;
+        setSeriesList(nextSeriesList);
+      } catch (exampleError) {
+        if (!cancelled && !(exampleError instanceof DOMException)) {
+          setError(getErrorMessage(exampleError));
+        }
+      } finally {
+        if (!cancelled) setIsLoadingExamples(false);
+      }
+    }
+
+    void loadExamples();
+
+    return () => {
+      cancelled = true;
+      abortController.abort();
+      releaseImageIds([...pendingExampleImageIds]);
+      pendingExampleImageIds.clear();
+    };
+  }, [isReady]);
 
   const goToImage = useCallback((nextIndex: number) => {
     const renderingEngine = renderingEngineRef.current;
@@ -781,6 +1001,7 @@ function App() {
         <SeriesPicker
           activeSeriesId={activeSeriesId}
           disabled={!isReady || isLoading}
+          isLoadingExamples={isLoadingExamples}
           series={seriesList}
           onAdd={() => fileInputRef.current?.click()}
           onSelect={(seriesId) => void selectSeries(seriesId)}
