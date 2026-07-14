@@ -1,5 +1,8 @@
 # MedView
 
+MedView is a browser-based DICOM viewer that pairs medical image stacks with
+an interactive, layered 3D anatomy model.
+
 ## 3D anatomy model attribution
 
 The anatomy model is adapted from:
