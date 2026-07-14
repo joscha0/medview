@@ -471,7 +471,7 @@ function App() {
         renderingEngineRef.current = renderingEngine;
 
         resizeObserver = new ResizeObserver(() => {
-          renderingEngine.resize(false, true);
+          renderingEngine.resize(true, true);
         });
         resizeObserver.observe(viewportElementRef.current);
         setIsReady(true);
