@@ -142,6 +142,20 @@ body {
   overflow: hidden;
 }
 
+.medview-app,
+.medview-app * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.medview-app .metadata-selectable,
+.medview-app .metadata-selectable * {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  -webkit-touch-callout: default;
+}
+
 button,
 input {
   font: inherit;

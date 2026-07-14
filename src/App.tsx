@@ -983,7 +983,7 @@ function App() {
 
   return (
     <div
-      className="dark flex h-svh min-h-[520px] select-none flex-col overflow-hidden bg-background text-foreground"
+      className="medview-app dark flex h-svh min-h-[520px] flex-col overflow-hidden bg-background text-foreground"
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={(event) => event.preventDefault()}
