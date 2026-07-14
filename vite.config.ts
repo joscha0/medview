@@ -27,6 +27,25 @@ export default defineConfig({
         // default. They are required for opening local studies while offline.
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         navigateFallback: "index.html",
+        runtimeCaching: [
+          {
+            urlPattern: ({ sameOrigin, url }) =>
+              sameOrigin &&
+              (url.pathname.includes("/anatomy-layers/") ||
+                url.pathname.endsWith("/anatomy-optimized.glb")),
+            handler: "StaleWhileRevalidate",
+            options: {
+              cacheName: "medview-anatomy-layers",
+              cacheableResponse: {
+                statuses: [200],
+              },
+              expiration: {
+                maxEntries: 64,
+                purgeOnQuotaError: true,
+              },
+            },
+          },
+        ],
       },
     }),
   ],
