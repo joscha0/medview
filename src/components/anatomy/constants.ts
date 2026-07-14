@@ -48,7 +48,14 @@ export const HIDDEN_MUSCLE_COVERINGS = new Set([
   "Ligament",
 ]);
 
-export function getAnatomyLayerUrl(file: string) {
-  return `/anatomy-layers/${file}?v=anatomy-layers-1`;
+function getAnatomyAssetUrl(path: string) {
+  return `${import.meta.env.BASE_URL}anatomy-layers/${path}`;
 }
 
+export function getAnatomyLayerUrl(file: string) {
+  return `${getAnatomyAssetUrl(file)}?v=anatomy-layers-1`;
+}
+
+export function getAnatomyLayerPreviewUrl(layer: AnatomyLayerId) {
+  return getAnatomyAssetUrl(`previews/${layer}.png`);
+}

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo } from "react";
 import * as THREE from "three";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { cacheAnatomyAsset } from "./anatomy-cache";
 import {
   ANATOMY_LAYERS,
   DEFAULT_ANATOMY_LAYER,
@@ -33,9 +34,15 @@ type AnatomyModelProps = {
 };
 
 function useAnatomyLayer(url: string) {
-  return useLoader(GLTFLoader, url, (loader) => {
+  const gltf = useLoader(GLTFLoader, url, (loader) => {
     loader.setMeshoptDecoder(MeshoptDecoder);
   });
+
+  useEffect(() => {
+    void cacheAnatomyAsset(url);
+  }, [url]);
+
+  return gltf;
 }
 
 function AnatomyLayer({
@@ -166,4 +173,3 @@ export function AnatomyModel({
     </>
   );
 }
-

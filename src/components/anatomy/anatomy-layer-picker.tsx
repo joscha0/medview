@@ -4,7 +4,12 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { ANATOMY_LAYERS, type AnatomyLayerId } from "./constants";
+import { cacheAnatomyAsset } from "./anatomy-cache";
+import {
+  ANATOMY_LAYERS,
+  getAnatomyLayerPreviewUrl,
+  type AnatomyLayerId,
+} from "./constants";
 
 type AnatomyLayerPickerProps = {
   selectedLayers: ReadonlySet<AnatomyLayerId>;
@@ -59,6 +64,7 @@ export function AnatomyLayerPicker({
       >
         {ANATOMY_LAYERS.map((layer) => {
           const selected = selectedLayers.has(layer.id);
+          const previewUrl = getAnatomyLayerPreviewUrl(layer.id);
           return (
             <Card
               key={layer.id}
@@ -80,9 +86,10 @@ export function AnatomyLayerPicker({
                 )}
               >
                 <img
-                  src={`/anatomy-layers/previews/${layer.id}.png`}
+                  src={previewUrl}
                   alt=""
                   draggable={false}
+                  onLoad={() => void cacheAnatomyAsset(previewUrl)}
                   className="h-12 min-h-0 w-full select-none object-contain"
                 />
                 <CardTitle className="line-clamp-2 flex min-h-5 min-w-0 w-full items-center justify-center break-words px-0.5 text-center text-[9px] font-normal leading-[1.05] [overflow-wrap:anywhere]">
