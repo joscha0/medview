@@ -129,7 +129,7 @@ export function PanelResizeHandle({
       aria-valuemax={100}
       aria-valuenow={Math.round(value)}
       className={cn(
-        "group relative z-30 grid shrink-0 touch-none place-items-center bg-border/70 outline-none transition-colors hover:bg-primary/60 focus-visible:bg-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+        "group relative z-30 grid shrink-0 touch-none select-none place-items-center bg-border/70 outline-none transition-colors hover:bg-primary/60 focus-visible:bg-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
         orientation === "vertical"
           ? "h-full w-2 cursor-col-resize"
           : "h-2 w-full cursor-row-resize",

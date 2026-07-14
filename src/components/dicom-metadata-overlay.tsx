@@ -96,7 +96,7 @@ export function DicomMetadataOverlay({
   return (
     <div className="pointer-events-none absolute inset-x-3 top-3 flex items-start justify-between gap-4 font-mono text-[11px] leading-4 text-white/70">
       {hasStudyContext ? (
-        <div className="max-w-[min(28rem,55%)] rounded bg-black/60 px-2 py-1.5 backdrop-blur-sm">
+        <div className="pointer-events-auto max-w-[min(28rem,55%)] select-text rounded bg-black/60 px-2 py-1.5 backdrop-blur-sm">
           {(patientName || patientDetails) && (
             <>
               {patientName && (
@@ -118,7 +118,7 @@ export function DicomMetadataOverlay({
         <div />
       )}
 
-      <div className="shrink-0 rounded bg-black/60 px-2 py-1.5 text-right tabular-nums backdrop-blur-sm">
+      <div className="pointer-events-auto shrink-0 select-text rounded bg-black/60 px-2 py-1.5 text-right tabular-nums backdrop-blur-sm">
         <div className="flex items-start justify-end gap-1.5">
           <div className="text-white/90">
             {currentIndex + 1} / {imageCount}
