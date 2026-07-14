@@ -1,5 +1,24 @@
 # MedView
 
+## 3D anatomy model attribution
+
+The anatomy model is adapted from:
+
+- **Z-Anatomy – The libre 3D atlas of anatomy**, by the Z-Anatomy
+  contributors, licensed under
+  [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+  [Source repository](https://github.com/Z-Anatomy/Models-of-human-anatomy)
+
+- **BodyParts3D – The Database Center for Life Science**, the original model
+  underlying Z-Anatomy, licensed under CC BY-SA 2.1 Japan.
+  [Original source](https://dbarchive.biosciencedbc.jp/en/bodyparts3d/download.html)
+
+Modifications: converted and optimized for browser rendering, divided into
+anatomical layers, and exported as GLB assets.
+
+The modified anatomy model assets are distributed under CC BY-SA 4.0.
+See the [upstream attribution and license](https://github.com/Z-Anatomy/Models-of-human-anatomy/blob/master/License.txt).
+
 ## Example Series Sources
 
 ### UPENN-GBM-00630
