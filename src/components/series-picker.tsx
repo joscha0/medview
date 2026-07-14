@@ -1,4 +1,11 @@
-import { FileImage, Loader2, Plus } from "lucide-react";
+import {
+  FileImage,
+  Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+} from "lucide-react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -29,12 +36,55 @@ export function SeriesPicker({
   onAdd,
   onSelect,
 }: SeriesPickerProps) {
+  const [isCollapsed, setIsCollapsed] = useState(false);
+
+  if (isCollapsed) {
+    return (
+      <aside
+        aria-label="Collapsed DICOM series picker"
+        className="w-10 shrink-0 border-r bg-background"
+      >
+        <button
+          type="button"
+          aria-expanded="false"
+          aria-label="Expand series panel"
+          className="flex size-full items-center justify-center text-muted-foreground outline-none transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          onClick={() => setIsCollapsed(false)}
+        >
+          <span className="flex flex-col items-center gap-3">
+            <PanelLeftOpen className="size-4" />
+            <span className="text-[10px] font-semibold uppercase tracking-[0.16em] [writing-mode:vertical-rl]">
+              Series
+            </span>
+          </span>
+        </button>
+      </aside>
+    );
+  }
+
   return (
     <aside
       aria-label="DICOM series picker"
       className="flex w-36 shrink-0 flex-col border-r bg-background sm:w-44"
     >
-      <div className="flex h-11 shrink-0 items-center justify-between border-b px-3">
+      <div className="grid h-12 shrink-0 grid-cols-[1.75rem_1fr_1.75rem] items-center border-b px-2">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-expanded="true"
+          aria-label="Collapse series panel"
+          onClick={() => setIsCollapsed(true)}
+        >
+          <PanelLeftClose />
+        </Button>
+        <div className="text-center text-sm font-semibold tracking-tight">
+          MedView
+        </div>
+        <span aria-hidden="true" />
+      </div>
+
+      <div className="flex h-10 shrink-0 items-center justify-between border-b px-3">
         <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
           Series
         </h2>
