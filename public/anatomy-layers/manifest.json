@@ -1,0 +1,189 @@
+{
+  "defaultLayer": "muscular-system",
+  "layers": [
+    {
+      "id": "skeletal-system",
+      "name": "Skeletal system",
+      "file": "skeletal-system.glb",
+      "objects": 1243,
+      "stats": {
+        "bytes": 1156904,
+        "nodes": 236,
+        "meshes": 118,
+        "primitives": 220,
+        "vertices": 83194,
+        "triangles": 150105,
+        "materials": 6,
+        "extensions_used": [
+          "KHR_mesh_quantization",
+          "EXT_meshopt_compression"
+        ],
+        "extensions_required": [
+          "KHR_mesh_quantization",
+          "EXT_meshopt_compression"
+        ]
+      }
+    },
+    {
+      "id": "muscular-insertions",
+      "name": "Muscular insertions",
+      "file": "muscular-insertions.glb",
+      "objects": 705,
+      "stats": {
+        "bytes": 1378576,
+        "nodes": 687,
+        "meshes": 347,
+        "primitives": 347,
+        "vertices": 84798,
+        "triangles": 165369,
+        "materials": 19,
+        "extensions_used": [
+          "KHR_mesh_quantization",
+          "EXT_meshopt_compression"
+        ],
+        "extensions_required": [
+          "KHR_mesh_quantization",
+          "EXT_meshopt_compression"
+        ]
+      }
+    },
+    {
+      "id": "joints",
+      "name": "Joints",
+      "file": "joints.glb",
+      "objects": 479,
+      "stats": {
+        "bytes": 675464,
+        "nodes": 375,
+        "meshes": 178,
+        "primitives": 178,
+        "vertices": 45276,
+        "triangles": 72697,
+        "materials": 4,
+        "extensions_used": [
+          "KHR_mesh_quantization",
+          "EXT_meshopt_compression"
+        ],
+        "extensions_required": [
+          "KHR_mesh_quantization",
+          "EXT_meshopt_compression"
+        ]
+      }
+    },
+    {
+      "id": "muscular-system",
+      "name": "Muscular system",
+      "file": "muscular-system.glb",
+      "objects": 788,
+      "stats": {
+        "bytes": 3226028,
+        "nodes": 679,
+        "meshes": 342,
+        "primitives": 457,
+        "vertices": 230659,
+        "triangles": 407055,
+        "materials": 26,
+        "extensions_used": [
+          "KHR_mesh_quantization",
+          "EXT_meshopt_compression"
+        ],
+        "extensions_required": [
+          "KHR_mesh_quantization",
+          "EXT_meshopt_compression"
+        ]
+      }
+    },
+    {
+      "id": "cardiovascular-system",
+      "name": "Cardiovascular system",
+      "file": "cardiovascular-system.glb",
+      "objects": 714,
+      "stats": {
+        "bytes": 919720,
+        "nodes": 509,
+        "meshes": 247,
+        "primitives": 253,
+        "vertices": 61069,
+        "triangles": 113330,
+        "materials": 7,
+        "extensions_used": [
+          "KHR_mesh_quantization",
+          "EXT_meshopt_compression"
+        ],
+        "extensions_required": [
+          "KHR_mesh_quantization",
+          "EXT_meshopt_compression"
+        ]
+      }
+    },
+    {
+      "id": "lymphoid-organs",
+      "name": "Lymphoid organs",
+      "file": "lymphoid-organs.glb",
+      "objects": 219,
+      "stats": {
+        "bytes": 244112,
+        "nodes": 110,
+        "meshes": 48,
+        "primitives": 49,
+        "vertices": 17202,
+        "triangles": 32576,
+        "materials": 3,
+        "extensions_used": [
+          "KHR_mesh_quantization",
+          "EXT_meshopt_compression"
+        ],
+        "extensions_required": [
+          "KHR_mesh_quantization",
+          "EXT_meshopt_compression"
+        ]
+      }
+    },
+    {
+      "id": "nervous-system-sense-organs",
+      "name": "Nervous system & Sense organs",
+      "file": "nervous-system-sense-organs.glb",
+      "objects": 708,
+      "stats": {
+        "bytes": 2039120,
+        "nodes": 532,
+        "meshes": 267,
+        "primitives": 333,
+        "vertices": 152587,
+        "triangles": 275487,
+        "materials": 27,
+        "extensions_used": [
+          "KHR_mesh_quantization",
+          "EXT_meshopt_compression"
+        ],
+        "extensions_required": [
+          "KHR_mesh_quantization",
+          "EXT_meshopt_compression"
+        ]
+      }
+    },
+    {
+      "id": "visceral-systems",
+      "name": "Visceral systems",
+      "file": "visceral-systems.glb",
+      "objects": 297,
+      "stats": {
+        "bytes": 803116,
+        "nodes": 30,
+        "meshes": 17,
+        "primitives": 35,
+        "vertices": 66987,
+        "triangles": 131005,
+        "materials": 22,
+        "extensions_used": [
+          "KHR_mesh_quantization",
+          "EXT_meshopt_compression"
+        ],
+        "extensions_required": [
+          "KHR_mesh_quantization",
+          "EXT_meshopt_compression"
+        ]
+      }
+    }
+  ]
+}

@@ -30,12 +30,17 @@ import {
   type WheelEvent,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  AnatomyViewer,
+  type DicomSlicePlane,
+} from "@/components/anatomy-viewer";
 
 const RENDERING_ENGINE_ID = "medview-rendering-engine";
 const VIEWPORT_ID = "medview-stack-viewport";
@@ -55,6 +60,13 @@ type DicomFileInfo = {
   file: File;
   imageOrientation?: [number, number, number, number, number, number];
   imagePosition?: Vector3;
+  pixelSpacing?: [number, number];
+  rows?: number;
+  columns?: number;
+  bodyPart?: string;
+  seriesDescription?: string;
+  studyDescription?: string;
+  patientHeightMm?: number;
   instanceNumber?: number;
   seriesInstanceUid: string;
 };
@@ -161,12 +173,33 @@ async function parseDicomHeader(file: File): Promise<DicomFileInfo> {
     dataSet.string("x00200037"),
     6,
   ) as DicomFileInfo["imageOrientation"];
+  const pixelSpacing = parseNumberList(
+    dataSet.string("x00280030"),
+    2,
+  ) as DicomFileInfo["pixelSpacing"];
+  const rows = dataSet.uint16("x00280010");
+  const columns = dataSet.uint16("x00280011");
+  const bodyPart = dataSet.string("x00180015")?.trim();
+  const seriesDescription = dataSet.string("x0008103e")?.trim();
+  const studyDescription = dataSet.string("x00081030")?.trim();
+  const patientSizeMeters = Number(dataSet.string("x00101020"));
+  const patientHeightMm =
+    Number.isFinite(patientSizeMeters) && patientSizeMeters > 0
+      ? patientSizeMeters * 1000
+      : undefined;
   const instanceNumber = dataSet.intString("x00200013");
 
   return {
     file,
     imageOrientation,
     imagePosition,
+    pixelSpacing,
+    rows,
+    columns,
+    bodyPart,
+    seriesDescription,
+    studyDescription,
+    patientHeightMm,
     instanceNumber,
     seriesInstanceUid,
   };
@@ -248,6 +281,75 @@ function sortDicomFiles(files: DicomFileInfo[]) {
   });
 }
 
+function getDicomSlicePlane(
+  files: DicomFileInfo[],
+  index: number,
+): DicomSlicePlane | null {
+  const current = files[index];
+  if (
+    !current?.imageOrientation ||
+    !current.imagePosition ||
+    !current.pixelSpacing ||
+    current.pixelSpacing.some((spacing) => spacing <= 0) ||
+    !current.rows ||
+    !current.columns
+  ) {
+    return null;
+  }
+
+  const normal = getSliceNormal(current.imageOrientation);
+  if (!normal) return null;
+
+  const sliceDistances = files.flatMap((file) => {
+    if (!file.imagePosition) return [];
+    return [
+      file.imagePosition.reduce(
+        (distance, value, coordinate) =>
+          distance + value * normal[coordinate],
+        0,
+      ),
+    ];
+  });
+  if (!sliceDistances.length) return null;
+
+  const currentDistance = current.imagePosition.reduce(
+    (distance, value, coordinate) =>
+      distance + value * normal[coordinate],
+    0,
+  );
+  const seriesCenter =
+    (Math.min(...sliceDistances) + Math.max(...sliceDistances)) / 2;
+
+  return {
+    anatomicalCenterHeightFraction:
+      getAnatomicalCenterHeightFraction(current),
+    imageOrientation: current.imageOrientation,
+    offsetFromSeriesCenterMm: currentDistance - seriesCenter,
+    patientHeightMm: current.patientHeightMm,
+    widthMm: current.columns * current.pixelSpacing[1],
+    heightMm: current.rows * current.pixelSpacing[0],
+  };
+}
+
+function getAnatomicalCenterHeightFraction(file: DicomFileInfo) {
+  const region = [file.bodyPart, file.seriesDescription, file.studyDescription]
+    .filter(Boolean)
+    .join(" ")
+    .toUpperCase();
+
+  if (/WHOLE.?BODY|FULL.?BODY/.test(region)) return 0;
+  if (/CHEST.*ABD.*PELV|THORAX.*ABD.*PELV/.test(region)) return 0.19;
+  if (/CHEST.*ABD|THORAX.*ABD/.test(region)) return 0.16;
+  if (/ABD.*PELV/.test(region)) return -0.01;
+  if (/HEAD|BRAIN|SKULL/.test(region)) return 0.45;
+  if (/NECK|CERVICAL/.test(region)) return 0.35;
+  if (/CHEST|THORAX|LUNG|COVID/.test(region)) return 0.21;
+  if (/ABDOMEN|ABDOMINAL/.test(region)) return 0.03;
+  if (/PELVIS|PELVIC|HIP/.test(region)) return -0.12;
+  if (/LEG|LOWER.?EXTREM/.test(region)) return -0.32;
+  return 0;
+}
+
 function getManagedFileIndex(imageId: string) {
   const match = /^dicomfile:(\d+)$/.exec(imageId);
   return match ? Number(match[1]) : undefined;
@@ -312,6 +414,11 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [imageCount, setImageCount] = useState(0);
+  const [seriesFiles, setSeriesFiles] = useState<DicomFileInfo[]>([]);
+  const slicePlane = useMemo(
+    () => getDicomSlicePlane(seriesFiles, currentIndex),
+    [currentIndex, seriesFiles],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -416,7 +523,8 @@ function App() {
         );
       }
 
-      const sortedFiles = sortDicomFiles(dicomFiles).map((item) => item.file);
+      const sortedDicomFiles = sortDicomFiles(dicomFiles);
+      const sortedFiles = sortedDicomFiles.map((item) => item.file);
 
       candidateImageIds = sortedFiles.map((file) =>
         wadouri.fileManager.add(file),
@@ -454,6 +562,7 @@ function App() {
       currentIndexRef.current = initialIndex;
       setCurrentIndex(initialIndex);
       setImageCount(candidateImageIds.length);
+      setSeriesFiles(sortedDicomFiles);
       releaseImageIds(previousImageIds);
     } catch (loadError) {
       if (generation !== loadGenerationRef.current) {
@@ -534,6 +643,8 @@ function App() {
 
       <main className="relative flex min-h-0 flex-1">
         <section className="flex min-w-0 flex-1 flex-col">
+          <AnatomyViewer slicePlane={slicePlane} />
+
           <div
             className="relative min-h-0 flex-1 overflow-hidden bg-black outline-none focus-visible:ring-2 focus-visible:ring-ring"
             onWheel={handleWheel}
