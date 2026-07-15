@@ -783,6 +783,7 @@ function App() {
   useEffect(() => {
     let cancelled = false;
     let resizeObserver: ResizeObserver | undefined;
+    let removeMobileGestureGuards: (() => void) | undefined;
 
     async function setUpViewer() {
       try {
@@ -813,6 +814,49 @@ function App() {
           renderingEngine.resize(true, true);
         });
         resizeObserver.observe(viewportElementRef.current);
+
+        const viewportElement = viewportElementRef.current;
+        const preventMultiTouchBrowserGesture = (event: TouchEvent) => {
+          if (event.touches.length > 1) event.preventDefault();
+        };
+        const preventSafariGesture = (event: Event) => event.preventDefault();
+        const gestureEvents = [
+          "gesturestart",
+          "gesturechange",
+          "gestureend",
+        ] as const;
+
+        viewportElement.addEventListener(
+          "touchstart",
+          preventMultiTouchBrowserGesture,
+          { passive: false },
+        );
+        viewportElement.addEventListener(
+          "touchmove",
+          preventMultiTouchBrowserGesture,
+          { passive: false },
+        );
+        gestureEvents.forEach((eventName) =>
+          viewportElement.addEventListener(eventName, preventSafariGesture, {
+            passive: false,
+          }),
+        );
+        removeMobileGestureGuards = () => {
+          viewportElement.removeEventListener(
+            "touchstart",
+            preventMultiTouchBrowserGesture,
+          );
+          viewportElement.removeEventListener(
+            "touchmove",
+            preventMultiTouchBrowserGesture,
+          );
+          gestureEvents.forEach((eventName) =>
+            viewportElement.removeEventListener(
+              eventName,
+              preventSafariGesture,
+            ),
+          );
+        };
         setIsReady(true);
       } catch (setupError) {
         setError(getErrorMessage(setupError));
@@ -826,6 +870,7 @@ function App() {
       loadGenerationRef.current += 1;
       navigationGenerationRef.current += 1;
       resizeObserver?.disconnect();
+      removeMobileGestureGuards?.();
       if (renderQualityRestoreTimerRef.current !== null) {
         window.clearTimeout(renderQualityRestoreTimerRef.current);
       }
