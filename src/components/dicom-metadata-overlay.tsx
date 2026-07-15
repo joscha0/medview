@@ -2,25 +2,9 @@ import { Info, X } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import type { DicomMetadata } from "@/dicom/types";
 
-export type DicomMetadata = {
-  patientName?: string;
-  patientId?: string;
-  patientAge?: string;
-  patientSex?: string;
-  studyDate?: string;
-  modality?: string;
-  studyDescription?: string;
-  seriesDescription?: string;
-  bodyPart?: string;
-  patientPosition?: string;
-  rows?: number;
-  columns?: number;
-  pixelSpacing?: [number, number];
-  sliceThicknessMm?: number;
-  windowCenter?: number;
-  windowWidth?: number;
-};
+export type { DicomMetadata } from "@/dicom/types";
 
 type DicomMetadataOverlayProps = {
   metadata?: DicomMetadata;

@@ -6,7 +6,6 @@ import {
   RenderingEngine,
   setVolumesForViewports,
   StackViewport,
-  type Types,
   utilities,
   volumeLoader,
   init as initCornerstoneCore,
@@ -17,7 +16,6 @@ import {
 } from "@cornerstonejs/dicom-image-loader";
 import {
   addTool,
-  Enums as ToolEnums,
   init as initCornerstoneTools,
   ToolGroupManager,
   ZoomTool,
@@ -26,20 +24,16 @@ import {
   Enums as MetadataEnums,
   utilities as metadataUtilities,
 } from "@cornerstonejs/metadata";
-import { parseDicom, type DataSet } from "dicom-parser";
 import {
   AlertCircle,
   Box,
   ChevronLeft,
   ChevronRight,
-  Crop,
   FileImage,
   Loader2,
   RotateCcw,
   Rows3,
-  SlidersHorizontal,
   Upload,
-  X,
 } from "lucide-react";
 import {
   type ChangeEvent,
@@ -57,42 +51,53 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   AnatomyViewer,
-  type DicomSlicePlane,
 } from "@/components/anatomy-viewer";
-import {
-  DicomMetadataOverlay,
-  type DicomMetadata,
-} from "@/components/dicom-metadata-overlay";
+import { DicomMetadataOverlay } from "@/components/dicom-metadata-overlay";
 import { PanelResizeHandle } from "@/components/panel-resize-handle";
+import { VolumeRenderingOptions } from "@/components/volume-rendering-options";
 import {
   SeriesPicker,
-  type SeriesPickerItem,
 } from "@/components/series-picker";
+import {
+  getDicomSlicePlane,
+  hydrateExampleSeries,
+  readDicomHeaders,
+  sortDicomFiles,
+} from "@/dicom/series";
+import type {
+  DicomFileInfo,
+  DicomSeries,
+  ExampleSeriesManifest,
+  ViewMode,
+} from "@/dicom/types";
 import { OrbitRotateTool } from "@/tools/orbit-rotate-tool";
 import { TouchVolumeCroppingTool } from "@/tools/touch-volume-cropping-tool";
+import {
+  alignVolumeCameraForOrbit,
+  applyCurrentCrop,
+  applyVolumePresentation,
+  bindToolsToViewport,
+  clearCurrentCrop,
+  cloneCamera,
+  forgetVolumeCropState,
+  getDefaultVolumePreset,
+  removeCachedVolume,
+  RENDERING_ENGINE_ID,
+  setVolumeToolsActive,
+  startCropEditing,
+  syncCropAfterResize,
+  TOOL_GROUP_ID,
+  VIEWPORT_ID,
+} from "@/viewer/volume-controller";
 
-const RENDERING_ENGINE_ID = "medview-rendering-engine";
-const VIEWPORT_ID = "medview-stack-viewport";
-const TOOL_GROUP_ID = "medview-volume-tools";
 const LOAD_TIMEOUT_MS = 30_000;
-const HEADER_READ_SIZE = 1024 * 1024;
-const EXAMPLE_HEADER_READ_SIZE = 8 * 1024;
-const HEADER_READER_COUNT = 4;
-const EXAMPLE_HEADER_READER_COUNT = 12;
 const DEFAULT_ANATOMY_PANEL_SIZE = 35;
 const MIN_VIEWER_PANEL_HEIGHT = 140;
 const INTERACTIVE_SAMPLE_DISTANCE_MULTIPLIER = 6;
 const FINAL_SAMPLE_DISTANCE_MULTIPLIER = 1;
 const RENDER_QUALITY_RESTORE_DELAY_MS = 140;
-const fileNameCollator = new Intl.Collator(undefined, {
-  numeric: true,
-  sensitivity: "base",
-});
-
 let initializationPromise: Promise<void> | undefined;
-
-type Vector3 = [number, number, number];
-type ViewMode = "stack" | "volume";
+type CropMode = "none" | "editing" | "applied";
 
 const CT_VOLUME_PRESETS = [
   { label: "Bone", value: "CT-Bone" },
@@ -109,39 +114,6 @@ const MR_VOLUME_PRESETS = [
   { label: "T2 brain", value: "MR-T2-Brain" },
 ] as const;
 
-type DicomFileInfo = DicomMetadata & {
-  file: File;
-  imageOrientation?: [number, number, number, number, number, number];
-  imagePosition?: Vector3;
-  patientHeightMm?: number;
-  instanceNumber?: number;
-  seriesInstanceUid: string;
-};
-
-type DicomSeries = SeriesPickerItem & {
-  exampleEntry?: ExampleSeriesManifest["series"][number];
-  files: DicomFileInfo[];
-  imageIds: string[];
-  initialVolumeCamera?: Types.ICamera;
-  currentIndex: number;
-  opacityThreshold?: number;
-  seriesInstanceUid: string;
-  volumePreset?: string;
-};
-
-type ExampleSeriesManifest = {
-  series: Array<{
-    directory: string;
-    files: string[];
-    label: string;
-    thumbnail?: string;
-  }>;
-};
-
-type ExampleDicomFile = {
-  info: DicomFileInfo;
-  url: string;
-};
 
 function initializeCornerstone() {
   if (!initializationPromise) {
@@ -205,373 +177,6 @@ function withTimeout<T>(
   });
 }
 
-function parseNumberList(value: string | undefined, length: number) {
-  if (!value) return undefined;
-
-  const values = value.split("\\").map(Number);
-  if (
-    values.length !== length ||
-    values.some((item) => !Number.isFinite(item))
-  ) {
-    return undefined;
-  }
-
-  return values;
-}
-
-function parseFirstNumber(value: string | undefined) {
-  const firstValue = value?.split("\\")[0].trim();
-  if (!firstValue) return undefined;
-  const number = Number(firstValue);
-  return Number.isFinite(number) ? number : undefined;
-}
-
-async function parseDicomHeader(file: File): Promise<DicomFileInfo> {
-  function parse(blob: Blob): Promise<DataSet> {
-    return blob.arrayBuffer().then((buffer) =>
-      parseDicom(new Uint8Array(buffer), {
-        untilTag: "x7fe00010",
-      }),
-    );
-  }
-
-  let dataSet: DataSet;
-  const headerBlob = file.slice(0, Math.min(file.size, HEADER_READ_SIZE));
-
-  try {
-    dataSet = await parse(headerBlob);
-  } catch {
-    try {
-      dataSet = await parse(file);
-    } catch {
-      throw new Error(`${file.name} is not a readable DICOM Part 10 file.`);
-    }
-  }
-
-  const seriesInstanceUid = dataSet.string("x0020000e")?.trim();
-  if (!seriesInstanceUid) {
-    throw new Error(`${file.name} does not contain a Series Instance UID.`);
-  }
-
-  const imagePosition = parseNumberList(dataSet.string("x00200032"), 3) as
-    | Vector3
-    | undefined;
-  const imageOrientation = parseNumberList(
-    dataSet.string("x00200037"),
-    6,
-  ) as DicomFileInfo["imageOrientation"];
-  const pixelSpacing = parseNumberList(
-    dataSet.string("x00280030"),
-    2,
-  ) as DicomFileInfo["pixelSpacing"];
-  const rows = dataSet.uint16("x00280010");
-  const columns = dataSet.uint16("x00280011");
-  const bodyPart = dataSet.string("x00180015")?.trim();
-  const modality = dataSet.string("x00080060")?.trim();
-  const studyDate = dataSet.string("x00080020")?.trim();
-  const seriesDescription = dataSet.string("x0008103e")?.trim();
-  const studyDescription = dataSet.string("x00081030")?.trim();
-  const patientName = dataSet.string("x00100010")?.trim();
-  const patientId = dataSet.string("x00100020")?.trim();
-  const patientSex = dataSet.string("x00100040")?.trim();
-  const patientAge = dataSet.string("x00101010")?.trim();
-  const patientPosition = dataSet.string("x00185100")?.trim();
-  const sliceThicknessMm = parseFirstNumber(dataSet.string("x00180050"));
-  const windowCenter = parseFirstNumber(dataSet.string("x00281050"));
-  const windowWidth = parseFirstNumber(dataSet.string("x00281051"));
-  const patientSizeMeters = Number(dataSet.string("x00101020"));
-  const patientHeightMm =
-    Number.isFinite(patientSizeMeters) && patientSizeMeters > 0
-      ? patientSizeMeters * 1000
-      : undefined;
-  const instanceNumber = dataSet.intString("x00200013");
-
-  return {
-    file,
-    imageOrientation,
-    imagePosition,
-    pixelSpacing,
-    rows,
-    columns,
-    bodyPart,
-    modality,
-    studyDate,
-    seriesDescription,
-    studyDescription,
-    patientName,
-    patientId,
-    patientSex,
-    patientAge,
-    patientPosition,
-    sliceThicknessMm,
-    windowCenter,
-    windowWidth,
-    patientHeightMm,
-    instanceNumber,
-    seriesInstanceUid,
-  };
-}
-
-async function readDicomHeaders(files: File[]) {
-  const results = new Array<DicomFileInfo>(files.length);
-  let nextIndex = 0;
-
-  async function readNext() {
-    while (nextIndex < files.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      results[index] = await parseDicomHeader(files[index]);
-    }
-  }
-
-  await Promise.all(
-    Array.from(
-      { length: Math.min(HEADER_READER_COUNT, files.length) },
-      readNext,
-    ),
-  );
-
-  return results;
-}
-
-function getExampleFileUrl(directory: string, fileName: string) {
-  const relativePath = [
-    "example-series",
-    encodeURIComponent(directory),
-    encodeURIComponent(fileName),
-  ].join("/");
-  return new URL(`${import.meta.env.BASE_URL}${relativePath}`, document.baseURI)
-    .href;
-}
-
-async function readExampleDicomHeader(
-  directory: string,
-  fileName: string,
-  signal: AbortSignal,
-): Promise<ExampleDicomFile> {
-  const url = getExampleFileUrl(directory, fileName);
-
-  async function fetchFile(useRange: boolean) {
-    const response = await fetch(url, {
-      headers: useRange
-        ? { Range: `bytes=0-${EXAMPLE_HEADER_READ_SIZE - 1}` }
-        : undefined,
-      signal,
-    });
-    if (!response.ok) {
-      throw new Error(`Could not load example file ${fileName}.`);
-    }
-
-    return {
-      file: new File([await response.blob()], fileName),
-      isPartial: response.status === 206,
-    };
-  }
-
-  const header = await fetchFile(true);
-  try {
-    return { info: await parseDicomHeader(header.file), url };
-  } catch (headerError) {
-    if (!header.isPartial) throw headerError;
-    const fullFile = await fetchFile(false);
-    return { info: await parseDicomHeader(fullFile.file), url };
-  }
-}
-
-async function readExampleDicomHeaders(
-  entry: ExampleSeriesManifest["series"][number],
-  signal: AbortSignal,
-) {
-  const results = new Array<ExampleDicomFile>(entry.files.length);
-  let nextIndex = 0;
-
-  async function readNext() {
-    while (nextIndex < entry.files.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      results[index] = await readExampleDicomHeader(
-        entry.directory,
-        entry.files[index],
-        signal,
-      );
-    }
-  }
-
-  await Promise.all(
-    Array.from(
-      {
-        length: Math.min(
-          EXAMPLE_HEADER_READER_COUNT,
-          entry.files.length,
-        ),
-      },
-      readNext,
-    ),
-  );
-
-  return results;
-}
-
-async function hydrateExampleSeries(
-  series: DicomSeries,
-  signal: AbortSignal,
-) {
-  const entry = series.exampleEntry;
-  if (!entry || series.files.length) return;
-
-  const exampleFiles = await readExampleDicomHeaders(entry, signal);
-  const seriesInstanceUids = new Set(
-    exampleFiles.map((item) => item.info.seriesInstanceUid),
-  );
-  if (seriesInstanceUids.size !== 1) {
-    throw new Error(`${entry.label} contains more than one DICOM series.`);
-  }
-
-  const urlByFileName = new Map(
-    exampleFiles.map((item) => [item.info.file.name, item.url]),
-  );
-  const sortedDicomFiles = sortDicomFiles(
-    exampleFiles.map((item) => item.info),
-  );
-  const imageIds = sortedDicomFiles.map((item) => {
-    const url = urlByFileName.get(item.file.name);
-    if (!url) throw new Error(`Missing example file ${item.file.name}.`);
-    return `wadouri:${url}`;
-  });
-  const firstFile = sortedDicomFiles[0];
-
-  series.files = sortedDicomFiles;
-  series.imageIds = imageIds;
-  series.currentIndex = Math.floor(imageIds.length / 2);
-  series.imageCount = imageIds.length;
-  series.label =
-    firstFile.seriesDescription ||
-    firstFile.studyDescription ||
-    entry.label;
-  series.modality = firstFile.modality;
-  series.seriesInstanceUid = firstFile.seriesInstanceUid;
-}
-
-function getSliceNormal(
-  orientation: DicomFileInfo["imageOrientation"],
-): Vector3 | undefined {
-  if (!orientation) return undefined;
-
-  const normal: Vector3 = [
-    orientation[1] * orientation[5] - orientation[2] * orientation[4],
-    orientation[2] * orientation[3] - orientation[0] * orientation[5],
-    orientation[0] * orientation[4] - orientation[1] * orientation[3],
-  ];
-  const magnitude = Math.hypot(...normal);
-
-  if (!magnitude) return undefined;
-  return normal.map((value) => value / magnitude) as Vector3;
-}
-
-function sortDicomFiles(files: DicomFileInfo[]) {
-  const normal = getSliceNormal(
-    files.find((item) => item.imageOrientation)?.imageOrientation,
-  );
-  const hasSpatialOrder = Boolean(
-    normal && files.every((item) => item.imagePosition),
-  );
-
-  return [...files].sort((first, second) => {
-    if (hasSpatialOrder && normal) {
-      const firstPosition = first.imagePosition as Vector3;
-      const secondPosition = second.imagePosition as Vector3;
-      const firstDistance = firstPosition.reduce(
-        (distance, value, index) => distance + value * normal[index],
-        0,
-      );
-      const secondDistance = secondPosition.reduce(
-        (distance, value, index) => distance + value * normal[index],
-        0,
-      );
-
-      if (Math.abs(firstDistance - secondDistance) > 0.0001) {
-        return firstDistance - secondDistance;
-      }
-    }
-
-    if (
-      first.instanceNumber !== undefined &&
-      second.instanceNumber !== undefined &&
-      first.instanceNumber !== second.instanceNumber
-    ) {
-      return first.instanceNumber - second.instanceNumber;
-    }
-
-    return fileNameCollator.compare(first.file.name, second.file.name);
-  });
-}
-
-function getDicomSlicePlane(
-  files: DicomFileInfo[],
-  index: number,
-): DicomSlicePlane | null {
-  const current = files[index];
-  if (
-    !current?.imageOrientation ||
-    !current.imagePosition ||
-    !current.pixelSpacing ||
-    current.pixelSpacing.some((spacing) => spacing <= 0) ||
-    !current.rows ||
-    !current.columns
-  ) {
-    return null;
-  }
-
-  const normal = getSliceNormal(current.imageOrientation);
-  if (!normal) return null;
-
-  const sliceDistances = files.flatMap((file) => {
-    if (!file.imagePosition) return [];
-    return [
-      file.imagePosition.reduce(
-        (distance, value, coordinate) => distance + value * normal[coordinate],
-        0,
-      ),
-    ];
-  });
-  if (!sliceDistances.length) return null;
-
-  const currentDistance = current.imagePosition.reduce(
-    (distance, value, coordinate) => distance + value * normal[coordinate],
-    0,
-  );
-  const seriesCenter =
-    (Math.min(...sliceDistances) + Math.max(...sliceDistances)) / 2;
-
-  return {
-    anatomicalCenterHeightFraction: getAnatomicalCenterHeightFraction(current),
-    imageOrientation: current.imageOrientation,
-    offsetFromSeriesCenterMm: currentDistance - seriesCenter,
-    patientHeightMm: current.patientHeightMm,
-    widthMm: current.columns * current.pixelSpacing[1],
-    heightMm: current.rows * current.pixelSpacing[0],
-  };
-}
-
-function getAnatomicalCenterHeightFraction(file: DicomFileInfo) {
-  const region = [file.bodyPart, file.seriesDescription, file.studyDescription]
-    .filter(Boolean)
-    .join(" ")
-    .toUpperCase();
-
-  if (/WHOLE.?BODY|FULL.?BODY/.test(region)) return 0;
-  if (/CHEST.*ABD.*PELV|THORAX.*ABD.*PELV/.test(region)) return 0.19;
-  if (/CHEST.*ABD|THORAX.*ABD/.test(region)) return 0.16;
-  if (/ABD.*PELV/.test(region)) return -0.01;
-  if (/HEAD|BRAIN|SKULL/.test(region)) return 0.45;
-  if (/NECK|CERVICAL/.test(region)) return 0.35;
-  if (/CHEST|THORAX|LUNG|COVID/.test(region)) return 0.21;
-  if (/ABDOMEN|ABDOMINAL/.test(region)) return 0.03;
-  if (/PELVIS|PELVIC|HIP/.test(region)) return -0.12;
-  if (/LEG|LOWER.?EXTREM/.test(region)) return -0.32;
-  return 0;
-}
-
 function getManagedFileIndex(imageId: string) {
   const match = /^dicomfile:(\d+)$/.exec(imageId);
   return match ? Number(match[1]) : undefined;
@@ -629,174 +234,6 @@ function getErrorMessage(error: unknown): string {
   return "The selected files could not be opened as a DICOM series.";
 }
 
-function getDefaultVolumePreset(modality?: string) {
-  return modality?.toUpperCase() === "MR" ? "MR-Default" : "CT-Bone";
-}
-
-function cloneCamera(camera: Types.ICamera): Types.ICamera {
-  return {
-    ...camera,
-    aspectRatio: camera.aspectRatio ? [...camera.aspectRatio] : undefined,
-    clippingRange: camera.clippingRange ? [...camera.clippingRange] : undefined,
-    focalPoint: camera.focalPoint ? [...camera.focalPoint] : undefined,
-    position: camera.position ? [...camera.position] : undefined,
-    viewPlaneNormal: camera.viewPlaneNormal
-      ? [...camera.viewPlaneNormal]
-      : undefined,
-    viewUp: camera.viewUp ? [...camera.viewUp] : undefined,
-  };
-}
-
-function alignVolumeCameraForOrbit(
-  viewport: InstanceType<typeof LegacyVolumeViewport3D>,
-) {
-  const camera = viewport.getCamera();
-  if (!camera.focalPoint || !camera.position) return;
-
-  const distance = Math.hypot(
-    camera.position[0] - camera.focalPoint[0],
-    camera.position[1] - camera.focalPoint[1],
-    camera.position[2] - camera.focalPoint[2],
-  );
-  if (distance === 0) return;
-
-  // DICOM patient coordinates are Z-up. Start from the anterior side so the
-  // camera is perpendicular to the orbit pole and horizontal drag has a clear
-  // direction immediately.
-  viewport.setCamera({
-    focalPoint: [...camera.focalPoint],
-    position: [
-      camera.focalPoint[0],
-      camera.focalPoint[1] - distance,
-      camera.focalPoint[2],
-    ],
-    viewUp: [0, 0, 1],
-  });
-}
-
-function recenterCamera(
-  viewport: InstanceType<typeof LegacyVolumeViewport3D>,
-  nextFocalPoint: Types.Point3,
-) {
-  const camera = viewport.getCamera();
-  if (!camera.focalPoint || !camera.position) return;
-
-  const offset: Types.Point3 = [
-    nextFocalPoint[0] - camera.focalPoint[0],
-    nextFocalPoint[1] - camera.focalPoint[1],
-    nextFocalPoint[2] - camera.focalPoint[2],
-  ];
-  viewport.setCamera({
-    focalPoint: [...nextFocalPoint],
-    position: [
-      camera.position[0] + offset[0],
-      camera.position[1] + offset[1],
-      camera.position[2] + offset[2],
-    ],
-  });
-}
-
-function applyVolumePresentation(
-  viewport: InstanceType<typeof LegacyVolumeViewport3D>,
-  preset: string,
-  opacityThreshold: number,
-) {
-  viewport.setProperties({ preset });
-  if (opacityThreshold <= 0) return;
-
-  const volumeActor = viewport.getDefaultActor().actor as Types.VolumeActor;
-  const opacityFunction = volumeActor.getProperty().getScalarOpacity(0);
-  const nodes = Array.from(
-    { length: opacityFunction.getSize() },
-    (_, index) => {
-      const node = [0, 0, 0.5, 0];
-      opacityFunction.getNodeValue(index, node);
-      return node;
-    },
-  );
-  if (!nodes.length) return;
-
-  const minimum = nodes[0][0];
-  const maximum = nodes[nodes.length - 1][0];
-  const threshold = minimum + (maximum - minimum) * (opacityThreshold / 100);
-
-  opacityFunction.removeAllPoints();
-  opacityFunction.addPoint(minimum, 0);
-  opacityFunction.addPoint(threshold, 0);
-  nodes
-    .filter(([intensity]) => intensity > threshold)
-    .forEach(([intensity, opacity, midpoint, sharpness]) => {
-      opacityFunction.addPointLong(intensity, opacity, midpoint, sharpness);
-    });
-}
-
-function removeCachedVolume(volumeId: string | null) {
-  if (!volumeId) return;
-  const volume = cache.getVolume(volumeId);
-  if (!volume) return;
-
-  if ("cancelLoading" in volume) volume.cancelLoading();
-  try {
-    cache.removeVolumeLoadObject(volumeId);
-  } catch {
-    // A concurrent mode or series change may already have removed it.
-  }
-}
-
-function setVolumeToolsActive(active: boolean) {
-  const toolGroup = ToolGroupManager.getToolGroup(TOOL_GROUP_ID);
-  if (!toolGroup) return;
-
-  if (!active) {
-    toolGroup.setToolDisabled(OrbitRotateTool.toolName);
-    toolGroup.setToolDisabled(TouchVolumeCroppingTool.toolName);
-    toolGroup.setToolDisabled(ZoomTool.toolName);
-    return;
-  }
-
-  toolGroup.setToolDisabled(TouchVolumeCroppingTool.toolName);
-  toolGroup.setToolActive(OrbitRotateTool.toolName, {
-    bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
-  });
-  toolGroup.setToolActive(ZoomTool.toolName, {
-    bindings: [
-      { mouseButton: ToolEnums.MouseBindings.Wheel },
-      { numTouchPoints: 2 },
-    ],
-  });
-}
-
-function getVolumeCroppingTool() {
-  return ToolGroupManager.getToolGroup(TOOL_GROUP_ID)?.getToolInstance(
-    TouchVolumeCroppingTool.toolName,
-  ) as TouchVolumeCroppingTool | undefined;
-}
-
-function forgetVolumeCropState() {
-  const croppingTool = getVolumeCroppingTool();
-  if (!croppingTool) return;
-
-  croppingTool.originalClippingPlanes = [];
-  croppingTool.sphereStates = [];
-  croppingTool.edgeLines = {};
-}
-
-function bindToolsToViewport() {
-  const toolGroup = ToolGroupManager.getToolGroup(TOOL_GROUP_ID);
-  if (!toolGroup) return;
-
-  const isAlreadyBound = toolGroup
-    .getViewportsInfo()
-    .some(
-      (viewport) =>
-        viewport.viewportId === VIEWPORT_ID &&
-        viewport.renderingEngineId === RENDERING_ENGINE_ID,
-    );
-  if (!isAlreadyBound) {
-    toolGroup.addViewport(VIEWPORT_ID, RENDERING_ENGINE_ID);
-  }
-}
-
 function App() {
   const viewportElementRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -834,8 +271,9 @@ function App() {
       typeof window === "undefined" ||
       window.matchMedia("(min-width: 1024px)").matches,
   );
-  const [isCropping, setIsCropping] = useState(false);
-  const [hasCrop, setHasCrop] = useState(false);
+  const [cropMode, setCropMode] = useState<CropMode>("none");
+  const isCropping = cropMode === "editing";
+  const hasCrop = cropMode !== "none";
   const [isLoadingExamples, setIsLoadingExamples] = useState(false);
   const [anatomyPanelSize, setAnatomyPanelSize] = useState(
     DEFAULT_ANATOMY_PANEL_SIZE,
@@ -882,24 +320,11 @@ function App() {
         resizeObserver = new ResizeObserver(() => {
           renderingEngine.resize(true, true);
           if (viewModeRef.current !== "volume") return;
-
-          const croppingTool = getVolumeCroppingTool();
-          if (
-            !croppingTool?.getClippingPlanesVisible() ||
-            croppingTool.originalClippingPlanes.length < 6
-          ) {
-            return;
-          }
-
           const viewport =
             renderingEngine.getViewport<
               InstanceType<typeof LegacyVolumeViewport3D>
             >(VIEWPORT_ID);
-          // Resizing can recreate the VTK viewport/mapper state. Reattach the
-          // saved world-space crop planes even while the interactive crop tool
-          // is disabled, otherwise the stale mapper can clip the whole volume.
-          croppingTool._updateClippingPlanes(viewport);
-          viewport.render();
+          syncCropAfterResize(viewport);
         });
         resizeObserver.observe(viewportElementRef.current);
 
@@ -1064,8 +489,7 @@ function App() {
         setVolumeToolsActive(false);
         activeRenderingEngine.disableElement(VIEWPORT_ID);
         forgetVolumeCropState();
-        setIsCropping(false);
-        setHasCrop(false);
+        setCropMode("none");
         removeCachedVolume(activeVolumeIdRef.current);
         activeVolumeIdRef.current = null;
         activeRenderingEngine.enableElement({
@@ -1115,8 +539,7 @@ function App() {
       try {
         renderingEngine.disableElement(VIEWPORT_ID);
         forgetVolumeCropState();
-        setIsCropping(false);
-        setHasCrop(false);
+        setCropMode("none");
         removeCachedVolume(activeVolumeIdRef.current);
         activeVolumeIdRef.current = null;
         renderingEngine.enableElement({
@@ -1553,151 +976,40 @@ function App() {
 
   function toggleCroppingMode() {
     const renderingEngine = renderingEngineRef.current;
-    const toolGroup = ToolGroupManager.getToolGroup(TOOL_GROUP_ID);
-    const croppingTool = getVolumeCroppingTool();
-    if (
-      !renderingEngine ||
-      !toolGroup ||
-      !croppingTool ||
-      viewModeRef.current !== "volume"
-    ) {
-      return;
-    }
-
-    try {
-      if (isCropping) {
-        croppingTool.setClippingPlanesVisible(true);
-        croppingTool.setHandlesVisible(false);
-        const cropPlanes = croppingTool.originalClippingPlanes.slice(0, 6);
-        if (cropPlanes.length === 6) {
-          const cropCenter = cropPlanes.reduce<Types.Point3>(
-            (center, { origin }) => [
-              center[0] + origin[0] / cropPlanes.length,
-              center[1] + origin[1] / cropPlanes.length,
-              center[2] + origin[2] / cropPlanes.length,
-            ],
-            [0, 0, 0],
-          );
-          const viewport =
-            renderingEngine.getViewport<
-              InstanceType<typeof LegacyVolumeViewport3D>
-            >(VIEWPORT_ID);
-          recenterCamera(viewport, cropCenter);
-          viewport.render();
-        }
-        toolGroup.setToolEnabled(TouchVolumeCroppingTool.toolName);
-        toolGroup.setToolActive(OrbitRotateTool.toolName, {
-          bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
-        });
-        setIsCropping(false);
-        return;
-      }
-
-      if (hasCrop) {
-        toolGroup.setToolDisabled(OrbitRotateTool.toolName);
-        toolGroup.setToolActive(TouchVolumeCroppingTool.toolName, {
-          bindings: [
-            { mouseButton: ToolEnums.MouseBindings.Primary },
-            { numTouchPoints: 1 },
-          ],
-        });
-        croppingTool.setClippingPlanesVisible(true);
-        croppingTool.setHandlesVisible(true);
-        setIsCropping(true);
-        return;
-      }
-
-      toolGroup.setToolDisabled(OrbitRotateTool.toolName);
-      toolGroup.setToolActive(TouchVolumeCroppingTool.toolName, {
-        bindings: [
-          { mouseButton: ToolEnums.MouseBindings.Primary },
-          { numTouchPoints: 1 },
-        ],
-      });
-      croppingTool.setClippingPlanesVisible(true);
-      croppingTool.setHandlesVisible(true);
-      setIsCropping(true);
-      setHasCrop(true);
-      setError(null);
-    } catch (cropError) {
-      setError(`Could not enable cropping: ${getErrorMessage(cropError)}`);
-    }
-  }
-
-  function clearVolumeCrop() {
-    const renderingEngine = renderingEngineRef.current;
-    const toolGroup = ToolGroupManager.getToolGroup(TOOL_GROUP_ID);
-    const croppingTool = getVolumeCroppingTool();
-    const series = seriesListRef.current.find(
-      (item) => item.id === activeSeriesIdRef.current,
-    );
-    if (
-      !renderingEngine ||
-      !toolGroup ||
-      !croppingTool ||
-      viewModeRef.current !== "volume"
-    ) {
-      return;
-    }
+    if (!renderingEngine || viewModeRef.current !== "volume") return;
 
     try {
       const viewport =
         renderingEngine.getViewport<
           InstanceType<typeof LegacyVolumeViewport3D>
         >(VIEWPORT_ID);
-      croppingTool.setClippingPlanesVisible(false);
-      croppingTool.setHandlesVisible(false);
-      const volumeActor = croppingTool._getVolumeActor();
-      const imageData = volumeActor?.getMapper()?.getInputData();
-      const directions = croppingTool.volumeDirectionVectors;
-      if (imageData && directions && croppingTool.sphereStates.length) {
-        const [width, height, depth] = imageData.getDimensions();
-        const center = [width / 2, height / 2, depth / 2];
-        const { xDir, yDir, zDir } = directions;
-        croppingTool.originalClippingPlanes = [
-          {
-            origin: imageData.indexToWorld([0, center[1], center[2]]),
-            normal: [...xDir],
-          },
-          {
-            origin: imageData.indexToWorld([width, center[1], center[2]]),
-            normal: [-xDir[0], -xDir[1], -xDir[2]],
-          },
-          {
-            origin: imageData.indexToWorld([center[0], 0, center[2]]),
-            normal: [...yDir],
-          },
-          {
-            origin: imageData.indexToWorld([center[0], height, center[2]]),
-            normal: [-yDir[0], -yDir[1], -yDir[2]],
-          },
-          {
-            origin: imageData.indexToWorld([center[0], center[1], 0]),
-            normal: [...zDir],
-          },
-          {
-            origin: imageData.indexToWorld([center[0], center[1], depth]),
-            normal: [-zDir[0], -zDir[1], -zDir[2]],
-          },
-        ];
-        croppingTool._updateFaceSpheresFromClippingPlanes();
-        croppingTool._updateCornerSpheresFromFaces();
-        croppingTool._updateFaceSpheresFromCorners();
-        croppingTool._updateCornerSpheres();
-        croppingTool._updateEdgeLines();
+      if (cropMode === "editing") {
+        applyCurrentCrop(viewport);
+        setCropMode("applied");
+      } else {
+        startCropEditing();
+        setCropMode("editing");
       }
+      setError(null);
+    } catch (cropError) {
+      setError(`Could not update cropping: ${getErrorMessage(cropError)}`);
+    }
+  }
 
-      if (series?.initialVolumeCamera?.focalPoint) {
-        recenterCamera(viewport, series.initialVolumeCamera.focalPoint);
-      }
+  function clearVolumeCrop() {
+    const renderingEngine = renderingEngineRef.current;
+    const series = seriesListRef.current.find(
+      (item) => item.id === activeSeriesIdRef.current,
+    );
+    if (!renderingEngine || viewModeRef.current !== "volume") return;
 
-      toolGroup.setToolDisabled(TouchVolumeCroppingTool.toolName);
-      toolGroup.setToolActive(OrbitRotateTool.toolName, {
-        bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
-      });
-      viewport.render();
-      setIsCropping(false);
-      setHasCrop(false);
+    try {
+      const viewport =
+        renderingEngine.getViewport<
+          InstanceType<typeof LegacyVolumeViewport3D>
+        >(VIEWPORT_ID);
+      clearCurrentCrop(viewport, series?.initialVolumeCamera?.focalPoint);
+      setCropMode("none");
       setError(null);
     } catch (cropError) {
       setError(`Could not clear the crop: ${getErrorMessage(cropError)}`);
@@ -1882,115 +1194,22 @@ function App() {
                 </div>
               )}
 
-              {imageCount > 0 &&
-                viewMode === "volume" &&
-                isVolumeOptionsOpen && (
-                  <div className="absolute inset-x-2 top-16 z-10 w-auto rounded-md border border-white/10 bg-black/70 p-2.5 text-white/80 backdrop-blur-sm md:inset-x-auto md:left-3 md:top-3 md:w-[min(22rem,calc(100%-9rem))]">
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <div className="whitespace-nowrap text-xs font-medium text-white/90">
-                        3D rendering options
-                      </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        className="-mr-1 -mt-1 text-white/55 hover:bg-white/10 hover:text-white"
-                        aria-label="Close 3D rendering options"
-                        onClick={() => setIsVolumeOptionsOpen(false)}
-                      >
-                        <X />
-                      </Button>
-                    </div>
-                    <label
-                      className="mb-1 block text-[11px] text-white/55"
-                      htmlFor="volume-preset"
-                    >
-                      Preset
-                    </label>
-                    <select
-                      id="volume-preset"
-                      className="h-8 w-full rounded border border-white/15 bg-black/60 px-2 text-xs text-white outline-none focus-visible:border-white/35 focus-visible:ring-2 focus-visible:ring-white/20"
-                      value={volumePreset}
-                      onChange={(event) =>
-                        changeVolumePreset(event.target.value)
-                      }
-                    >
-                      {volumePresetOptions.map((preset) => (
-                        <option key={preset.value} value={preset.value}>
-                          {preset.label}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 md:flex-nowrap">
-                      <label
-                        className="w-full shrink-0 text-[11px] text-white/55 md:w-auto"
-                        htmlFor="opacity-threshold"
-                      >
-                        Threshold
-                      </label>
-                      <input
-                        id="opacity-threshold"
-                        aria-valuetext={`${opacityThreshold}% intensity cutoff`}
-                        className="h-2 min-w-16 flex-1 cursor-pointer accent-primary"
-                        type="range"
-                        min={0}
-                        max={95}
-                        step={1}
-                        value={opacityThreshold}
-                        onChange={(event) =>
-                          changeOpacityThreshold(Number(event.target.value))
-                        }
-                      />
-                      <span className="w-9 shrink-0 text-right font-mono text-[11px] tabular-nums text-white/60">
-                        {opacityThreshold}%
-                      </span>
-                    </div>
-                    <div className="mt-2.5 flex flex-wrap items-center gap-2 border-t border-white/10 pt-2.5">
-                      <Button
-                        type="button"
-                        variant={hasCrop ? "secondary" : "outline"}
-                        size="xs"
-                        className="gap-1.5"
-                        onClick={toggleCroppingMode}
-                      >
-                        <Crop />
-                        {isCropping
-                          ? "Apply crop"
-                          : hasCrop
-                            ? "Edit crop"
-                            : "Crop volume"}
-                      </Button>
-                      {hasCrop && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="xs"
-                          className="text-white/60 hover:bg-white/10 hover:text-white"
-                          onClick={clearVolumeCrop}
-                        >
-                          Clear crop
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-              {imageCount > 0 &&
-                viewMode === "volume" &&
-                !isVolumeOptionsOpen && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    className="absolute left-3 top-3 z-10 h-10 gap-1.5 border-white/10 bg-black/70 px-3 text-sm text-white/70 backdrop-blur-sm hover:bg-black/80 hover:text-white @max-[18rem]:size-10 @max-[18rem]:gap-0 @max-[18rem]:px-0"
-                    aria-label="Open 3D rendering options"
-                    title="3D rendering options"
-                    onClick={() => setIsVolumeOptionsOpen(true)}
-                  >
-                    <SlidersHorizontal className="size-4" />
-                    <span className="@max-[18rem]:hidden">Options</span>
-                  </Button>
-                )}
+              {imageCount > 0 && viewMode === "volume" && (
+                <VolumeRenderingOptions
+                  hasCrop={hasCrop}
+                  isCropping={isCropping}
+                  isOpen={isVolumeOptionsOpen}
+                  opacityThreshold={opacityThreshold}
+                  preset={volumePreset}
+                  presets={volumePresetOptions}
+                  onClearCrop={clearVolumeCrop}
+                  onClose={() => setIsVolumeOptionsOpen(false)}
+                  onOpen={() => setIsVolumeOptionsOpen(true)}
+                  onPresetChange={changeVolumePreset}
+                  onThresholdChange={changeOpacityThreshold}
+                  onToggleCrop={toggleCroppingMode}
+                />
+              )}
 
               {!imageCount && !isLoading && (
                 <div className="pointer-events-none absolute inset-0 grid place-items-center p-6">
