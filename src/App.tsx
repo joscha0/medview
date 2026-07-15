@@ -21,6 +21,7 @@ import {
   init as initCornerstoneTools,
   ToolGroupManager,
   TrackballRotateTool,
+  VolumeCroppingTool,
   ZoomTool,
 } from "@cornerstonejs/tools";
 import {
@@ -33,6 +34,7 @@ import {
   Box,
   ChevronLeft,
   ChevronRight,
+  Crop,
   FileImage,
   Loader2,
   RotateCcw,
@@ -147,6 +149,7 @@ function initializeCornerstone() {
       });
       initCornerstoneTools();
       addTool(TrackballRotateTool);
+      addTool(VolumeCroppingTool);
       addTool(ZoomTool);
     });
   }
@@ -592,6 +595,28 @@ function cloneCamera(camera: Types.ICamera): Types.ICamera {
   };
 }
 
+function recenterCamera(
+  viewport: InstanceType<typeof LegacyVolumeViewport3D>,
+  nextFocalPoint: Types.Point3,
+) {
+  const camera = viewport.getCamera();
+  if (!camera.focalPoint || !camera.position) return;
+
+  const offset: Types.Point3 = [
+    nextFocalPoint[0] - camera.focalPoint[0],
+    nextFocalPoint[1] - camera.focalPoint[1],
+    nextFocalPoint[2] - camera.focalPoint[2],
+  ];
+  viewport.setCamera({
+    focalPoint: [...nextFocalPoint],
+    position: [
+      camera.position[0] + offset[0],
+      camera.position[1] + offset[1],
+      camera.position[2] + offset[2],
+    ],
+  });
+}
+
 function applyVolumePresentation(
   viewport: InstanceType<typeof LegacyVolumeViewport3D>,
   preset: string,
@@ -648,16 +673,33 @@ function setVolumeToolsActive(active: boolean) {
 
   if (!active) {
     toolGroup.setToolDisabled(TrackballRotateTool.toolName);
+    toolGroup.setToolDisabled(VolumeCroppingTool.toolName);
     toolGroup.setToolDisabled(ZoomTool.toolName);
     return;
   }
 
+  toolGroup.setToolDisabled(VolumeCroppingTool.toolName);
   toolGroup.setToolActive(TrackballRotateTool.toolName, {
     bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
   });
   toolGroup.setToolActive(ZoomTool.toolName, {
     bindings: [{ mouseButton: ToolEnums.MouseBindings.Wheel }],
   });
+}
+
+function getVolumeCroppingTool() {
+  return ToolGroupManager.getToolGroup(TOOL_GROUP_ID)?.getToolInstance(
+    VolumeCroppingTool.toolName,
+  ) as VolumeCroppingTool | undefined;
+}
+
+function forgetVolumeCropState() {
+  const croppingTool = getVolumeCroppingTool();
+  if (!croppingTool) return;
+
+  croppingTool.originalClippingPlanes = [];
+  croppingTool.sphereStates = [];
+  croppingTool.edgeLines = {};
 }
 
 function bindToolsToViewport() {
@@ -707,6 +749,8 @@ function App() {
   const [volumePreset, setVolumePreset] = useState("CT-Bone");
   const [opacityThreshold, setOpacityThreshold] = useState(0);
   const [isVolumeOptionsOpen, setIsVolumeOptionsOpen] = useState(true);
+  const [isCropping, setIsCropping] = useState(false);
+  const [hasCrop, setHasCrop] = useState(false);
   const [isLoadingExamples, setIsLoadingExamples] = useState(false);
   const [anatomyPanelSize, setAnatomyPanelSize] = useState(
     DEFAULT_ANATOMY_PANEL_SIZE,
@@ -740,6 +784,11 @@ function App() {
 
         const toolGroup = ToolGroupManager.createToolGroup(TOOL_GROUP_ID);
         toolGroup?.addTool(TrackballRotateTool.toolName);
+        toolGroup?.addTool(VolumeCroppingTool.toolName, {
+          initialCropFactor: 0.001,
+          showClippingPlanes: false,
+          showHandles: false,
+        });
         toolGroup?.addTool(ZoomTool.toolName);
         toolGroup?.addViewport(VIEWPORT_ID, RENDERING_ENGINE_ID);
         setVolumeToolsActive(false);
@@ -922,6 +971,9 @@ function App() {
       ) {
         setVolumeToolsActive(false);
         activeRenderingEngine.disableElement(VIEWPORT_ID);
+        forgetVolumeCropState();
+        setIsCropping(false);
+        setHasCrop(false);
         removeCachedVolume(activeVolumeIdRef.current);
         activeVolumeIdRef.current = null;
         activeRenderingEngine.enableElement({
@@ -970,6 +1022,9 @@ function App() {
 
       try {
         renderingEngine.disableElement(VIEWPORT_ID);
+        forgetVolumeCropState();
+        setIsCropping(false);
+        setHasCrop(false);
         removeCachedVolume(activeVolumeIdRef.current);
         activeVolumeIdRef.current = null;
         renderingEngine.enableElement({
@@ -1289,6 +1344,7 @@ function App() {
         >(VIEWPORT_ID);
       const defaultPreset = getDefaultVolumePreset(series.modality);
 
+      clearVolumeCrop();
       applyVolumePresentation(viewport, defaultPreset, 0);
       if (series.initialVolumeCamera) {
         viewport.setCamera(cloneCamera(series.initialVolumeCamera));
@@ -1368,6 +1424,144 @@ function App() {
       setError(
         `Could not apply the opacity threshold: ${getErrorMessage(thresholdError)}`,
       );
+    }
+  }
+
+  function toggleCroppingMode() {
+    const renderingEngine = renderingEngineRef.current;
+    const toolGroup = ToolGroupManager.getToolGroup(TOOL_GROUP_ID);
+    const croppingTool = getVolumeCroppingTool();
+    if (
+      !renderingEngine ||
+      !toolGroup ||
+      !croppingTool ||
+      viewModeRef.current !== "volume"
+    ) {
+      return;
+    }
+
+    try {
+      if (isCropping) {
+        croppingTool.setClippingPlanesVisible(true);
+        croppingTool.setHandlesVisible(false);
+        const cropPlanes = croppingTool.originalClippingPlanes.slice(0, 6);
+        if (cropPlanes.length === 6) {
+          const cropCenter = cropPlanes.reduce<Types.Point3>(
+            (center, { origin }) => [
+              center[0] + origin[0] / cropPlanes.length,
+              center[1] + origin[1] / cropPlanes.length,
+              center[2] + origin[2] / cropPlanes.length,
+            ],
+            [0, 0, 0],
+          );
+          const viewport =
+            renderingEngine.getViewport<
+              InstanceType<typeof LegacyVolumeViewport3D>
+            >(VIEWPORT_ID);
+          recenterCamera(viewport, cropCenter);
+          viewport.render();
+        }
+        setIsCropping(false);
+        return;
+      }
+
+      if (hasCrop) {
+        croppingTool.setHandlesVisible(true);
+        setIsCropping(true);
+        return;
+      }
+
+      toolGroup.setToolDisabled(TrackballRotateTool.toolName);
+      toolGroup.setToolActive(VolumeCroppingTool.toolName, {
+        bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
+      });
+      croppingTool.setClippingPlanesVisible(true);
+      croppingTool.setHandlesVisible(true);
+      setIsCropping(true);
+      setHasCrop(true);
+      setError(null);
+    } catch (cropError) {
+      setError(`Could not enable cropping: ${getErrorMessage(cropError)}`);
+    }
+  }
+
+  function clearVolumeCrop() {
+    const renderingEngine = renderingEngineRef.current;
+    const toolGroup = ToolGroupManager.getToolGroup(TOOL_GROUP_ID);
+    const croppingTool = getVolumeCroppingTool();
+    const series = seriesListRef.current.find(
+      (item) => item.id === activeSeriesIdRef.current,
+    );
+    if (
+      !renderingEngine ||
+      !toolGroup ||
+      !croppingTool ||
+      viewModeRef.current !== "volume"
+    ) {
+      return;
+    }
+
+    try {
+      const viewport =
+        renderingEngine.getViewport<
+          InstanceType<typeof LegacyVolumeViewport3D>
+        >(VIEWPORT_ID);
+      croppingTool.setClippingPlanesVisible(false);
+      croppingTool.setHandlesVisible(false);
+      const volumeActor = croppingTool._getVolumeActor();
+      const imageData = volumeActor?.getMapper()?.getInputData();
+      const directions = croppingTool.volumeDirectionVectors;
+      if (imageData && directions && croppingTool.sphereStates.length) {
+        const [width, height, depth] = imageData.getDimensions();
+        const center = [width / 2, height / 2, depth / 2];
+        const { xDir, yDir, zDir } = directions;
+        croppingTool.originalClippingPlanes = [
+          {
+            origin: imageData.indexToWorld([0, center[1], center[2]]),
+            normal: [...xDir],
+          },
+          {
+            origin: imageData.indexToWorld([width, center[1], center[2]]),
+            normal: [-xDir[0], -xDir[1], -xDir[2]],
+          },
+          {
+            origin: imageData.indexToWorld([center[0], 0, center[2]]),
+            normal: [...yDir],
+          },
+          {
+            origin: imageData.indexToWorld([center[0], height, center[2]]),
+            normal: [-yDir[0], -yDir[1], -yDir[2]],
+          },
+          {
+            origin: imageData.indexToWorld([center[0], center[1], 0]),
+            normal: [...zDir],
+          },
+          {
+            origin: imageData.indexToWorld([center[0], center[1], depth]),
+            normal: [-zDir[0], -zDir[1], -zDir[2]],
+          },
+        ];
+        croppingTool._updateFaceSpheresFromClippingPlanes();
+        croppingTool._updateCornerSpheresFromFaces();
+        croppingTool._updateFaceSpheresFromCorners();
+        croppingTool._updateCornerSpheres();
+        croppingTool._updateEdgeLines();
+      }
+
+      if (series?.initialVolumeCamera?.focalPoint) {
+        recenterCamera(viewport, series.initialVolumeCamera.focalPoint);
+      }
+
+      toolGroup.setToolDisabled(VolumeCroppingTool.toolName);
+      toolGroup.setToolActive(TrackballRotateTool.toolName, {
+        bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
+      });
+      viewport.render();
+      setIsCropping(false);
+      setHasCrop(false);
+      setError(null);
+    } catch (cropError) {
+      setError(`Could not clear the crop: ${getErrorMessage(cropError)}`);
     }
   }
 
@@ -1562,6 +1756,33 @@ function App() {
                         {opacityThreshold}%
                       </span>
                     </div>
+                    <div className="mt-2.5 flex items-center gap-2 border-t border-white/10 pt-2.5">
+                      <Button
+                        type="button"
+                        variant={hasCrop ? "secondary" : "outline"}
+                        size="xs"
+                        className="gap-1.5"
+                        onClick={toggleCroppingMode}
+                      >
+                        <Crop />
+                        {isCropping
+                          ? "Apply crop"
+                          : hasCrop
+                            ? "Edit crop"
+                            : "Crop volume"}
+                      </Button>
+                      {hasCrop && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="xs"
+                          className="text-white/60 hover:bg-white/10 hover:text-white"
+                          onClick={clearVolumeCrop}
+                        >
+                          Clear crop
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -1674,7 +1895,9 @@ function App() {
             ) : (
               <>
                 <p className="min-w-0 flex-1 text-sm text-muted-foreground">
-                  Drag to rotate · Scroll to zoom
+                  {isCropping
+                    ? "Drag crop handles · Scroll to zoom"
+                    : "Drag to rotate · Scroll to zoom"}
                 </p>
                 <Button
                   variant="outline"
