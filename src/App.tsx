@@ -85,6 +85,21 @@ let initializationPromise: Promise<void> | undefined;
 type Vector3 = [number, number, number];
 type ViewMode = "stack" | "volume";
 
+const CT_VOLUME_PRESETS = [
+  { label: "Bone", value: "CT-Bone" },
+  { label: "Soft tissue", value: "CT-Soft-Tissue" },
+  { label: "Lung", value: "CT-Lung" },
+  { label: "Vessels", value: "CT-Chest-Vessels" },
+  { label: "MIP", value: "CT-MIP" },
+] as const;
+
+const MR_VOLUME_PRESETS = [
+  { label: "MR default", value: "MR-Default" },
+  { label: "MR angiography", value: "MR-Angio" },
+  { label: "MR MIP", value: "MR-MIP" },
+  { label: "T2 brain", value: "MR-T2-Brain" },
+] as const;
+
 type DicomFileInfo = DicomMetadata & {
   file: File;
   imageOrientation?: [number, number, number, number, number, number];
@@ -99,6 +114,7 @@ type DicomSeries = SeriesPickerItem & {
   imageIds: string[];
   currentIndex: number;
   seriesInstanceUid: string;
+  volumePreset?: string;
 };
 
 type ExampleSeriesManifest = {
@@ -553,6 +569,10 @@ function getErrorMessage(error: unknown): string {
   return "The selected files could not be opened as a DICOM series.";
 }
 
+function getDefaultVolumePreset(modality?: string) {
+  return modality?.toUpperCase() === "MR" ? "MR-Default" : "CT-Bone";
+}
+
 function removeCachedVolume(volumeId: string | null) {
   if (!volumeId) return;
   const volume = cache.getVolume(volumeId);
@@ -628,6 +648,7 @@ function App() {
   const [seriesList, setSeriesList] = useState<DicomSeries[]>([]);
   const [activeSeriesId, setActiveSeriesId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("stack");
+  const [volumePreset, setVolumePreset] = useState("CT-Bone");
   const [isLoadingExamples, setIsLoadingExamples] = useState(false);
   const [anatomyPanelSize, setAnatomyPanelSize] = useState(
     DEFAULT_ANATOMY_PANEL_SIZE,
@@ -636,6 +657,10 @@ function App() {
     () => getDicomSlicePlane(seriesFiles, currentIndex),
     [currentIndex, seriesFiles],
   );
+  const volumePresetOptions =
+    seriesFiles[0]?.modality?.toUpperCase() === "MR"
+      ? MR_VOLUME_PRESETS
+      : CT_VOLUME_PRESETS;
 
   useEffect(() => {
     let cancelled = false;
@@ -915,11 +940,11 @@ function App() {
           renderingEngine.getViewport<
             InstanceType<typeof LegacyVolumeViewport3D>
           >(VIEWPORT_ID);
+        const preset =
+          series.volumePreset ?? getDefaultVolumePreset(series.modality);
+        series.volumePreset = preset;
         viewport.setProperties({
-          preset:
-            series.modality?.toUpperCase() === "MR"
-              ? "MR-Default"
-              : "CT-Bone",
+          preset,
         });
         viewport.resetCamera();
         viewport.render();
@@ -927,7 +952,7 @@ function App() {
         activeVolumeIdRef.current = volumeId;
         setVolumeToolsActive(true);
 
-        return { mode: "volume" as const, warning: null };
+        return { mode: "volume" as const, preset, warning: null };
       } catch (volumeError) {
         removeCachedVolume(volumeId);
         await displayStack(renderingEngine, element);
@@ -1002,6 +1027,7 @@ function App() {
       imageIdsRef.current = series.imageIds;
       currentIndexRef.current = series.currentIndex;
       setViewMode(result.mode);
+      if (result.mode === "volume") setVolumePreset(result.preset);
       setActiveSeriesId(series.id);
       setCurrentIndex(series.currentIndex);
       setImageCount(series.imageIds.length);
@@ -1114,6 +1140,7 @@ function App() {
       setSeriesList(nextSeriesList);
       setActiveSeriesId(newSeries.id);
       setViewMode(result.mode);
+      if (result.mode === "volume") setVolumePreset(result.preset);
       setCurrentIndex(initialIndex);
       setImageCount(candidateImageIds.length);
       setSeriesFiles(sortedDicomFiles);
@@ -1158,6 +1185,7 @@ function App() {
 
       viewModeRef.current = result.mode;
       setViewMode(result.mode);
+      if (result.mode === "volume") setVolumePreset(result.preset);
       setError(result.warning);
     } catch (modeError) {
       if (generation === loadGenerationRef.current) {
@@ -1178,6 +1206,34 @@ function App() {
       >(VIEWPORT_ID);
     viewport.resetCamera();
     viewport.render();
+  }
+
+  function changeVolumePreset(nextPreset: string) {
+    const renderingEngine = renderingEngineRef.current;
+    const series = seriesListRef.current.find(
+      (item) => item.id === activeSeriesIdRef.current,
+    );
+    if (
+      !renderingEngine ||
+      !series ||
+      viewModeRef.current !== "volume"
+    ) {
+      return;
+    }
+
+    try {
+      const viewport =
+        renderingEngine.getViewport<
+          InstanceType<typeof LegacyVolumeViewport3D>
+        >(VIEWPORT_ID);
+      viewport.setProperties({ preset: nextPreset });
+      viewport.render();
+      series.volumePreset = nextPreset;
+      setVolumePreset(nextPreset);
+      setError(null);
+    } catch (presetError) {
+      setError(`Could not apply this preset: ${getErrorMessage(presetError)}`);
+    }
   }
 
   function handleDragEnter(event: DragEvent) {
@@ -1404,6 +1460,21 @@ function App() {
                 <p className="min-w-0 flex-1 text-sm text-muted-foreground">
                   Drag to rotate · Scroll to zoom
                 </p>
+                <label className="sr-only" htmlFor="volume-preset">
+                  3D rendering preset
+                </label>
+                <select
+                  id="volume-preset"
+                  className="h-9 min-w-32 rounded-md border border-input bg-background px-2.5 text-sm text-foreground shadow-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+                  value={volumePreset}
+                  onChange={(event) => changeVolumePreset(event.target.value)}
+                >
+                  {volumePresetOptions.map((preset) => (
+                    <option key={preset.value} value={preset.value}>
+                      {preset.label}
+                    </option>
+                  ))}
+                </select>
                 <Button
                   variant="outline"
                   size="sm"
