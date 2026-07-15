@@ -1676,7 +1676,7 @@ function App() {
               <div ref={viewportElementRef} className="absolute inset-0" />
 
                 {imageCount > 0 && (
-                  <div className="absolute right-3 top-3 z-10 flex flex-col rounded-md border border-white/10 bg-black/70 p-1 backdrop-blur-sm md:flex-row">
+                  <div className="absolute right-3 top-3 z-10 flex rounded-md border border-white/10 bg-black/70 p-1 backdrop-blur-sm">
                     <Button
                       className="h-8 gap-1.5 px-2.5"
                       variant={viewMode === "stack" ? "secondary" : "ghost"}
@@ -1705,9 +1705,9 @@ function App() {
                 {imageCount > 0 &&
                   viewMode === "volume" &&
                   isVolumeOptionsOpen && (
-                  <div className="absolute left-3 top-3 z-10 w-[min(22rem,calc(100%-9rem))] rounded-md border border-white/10 bg-black/70 p-2.5 text-white/80 backdrop-blur-sm">
+                  <div className="absolute inset-x-2 top-16 z-10 w-auto rounded-md border border-white/10 bg-black/70 p-2.5 text-white/80 backdrop-blur-sm md:inset-x-auto md:left-3 md:top-3 md:w-[min(22rem,calc(100%-9rem))]">
                     <div className="mb-2 flex items-center justify-between gap-2">
-                      <div className="text-xs font-medium text-white/90">
+                      <div className="whitespace-nowrap text-xs font-medium text-white/90">
                         3D rendering options
                       </div>
                       <Button
@@ -1741,9 +1741,9 @@ function App() {
                         </option>
                       ))}
                     </select>
-                    <div className="mt-2.5 flex items-center gap-2">
+                    <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 md:flex-nowrap">
                       <label
-                        className="shrink-0 text-[11px] text-white/55"
+                        className="w-full shrink-0 text-[11px] text-white/55 md:w-auto"
                         htmlFor="opacity-threshold"
                       >
                         Threshold
@@ -1765,7 +1765,7 @@ function App() {
                         {opacityThreshold}%
                       </span>
                     </div>
-                    <div className="mt-2.5 flex items-center gap-2 border-t border-white/10 pt-2.5">
+                    <div className="mt-2.5 flex flex-wrap items-center gap-2 border-t border-white/10 pt-2.5">
                       <Button
                         type="button"
                         variant={hasCrop ? "secondary" : "outline"}

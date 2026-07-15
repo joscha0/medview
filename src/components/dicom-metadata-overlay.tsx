@@ -94,9 +94,9 @@ export function DicomMetadataOverlay({
   }
 
   return (
-    <div className="metadata-selectable pointer-events-auto absolute left-3 top-3 max-w-[min(28rem,calc(100%-9rem))] rounded bg-black/60 px-2 py-1.5 font-mono text-[11px] leading-4 text-white/70 backdrop-blur-sm">
-      <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1">
+    <div className="metadata-selectable pointer-events-auto absolute inset-x-2 top-16 max-w-none rounded bg-black/60 px-2 py-1.5 font-mono text-[11px] leading-4 text-white/70 backdrop-blur-sm md:inset-x-auto md:left-3 md:top-3 md:max-w-[min(28rem,calc(100%-9rem))]">
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-1 md:flex-nowrap">
+        <div className="min-w-0 w-full flex-1 [overflow-wrap:anywhere] md:w-auto">
           {(patientName || patientDetails) && (
             <>
               {patientName && (
