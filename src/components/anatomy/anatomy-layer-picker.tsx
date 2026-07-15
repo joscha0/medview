@@ -20,7 +20,11 @@ export function AnatomyLayerPicker({
   selectedLayers,
   onToggleLayer,
 }: AnatomyLayerPickerProps) {
-  const [isOpen, setIsOpen] = useState(true);
+  const [isOpen, setIsOpen] = useState(
+    () =>
+      typeof window === "undefined" ||
+      window.matchMedia("(min-width: 1024px)").matches,
+  );
 
   if (!isOpen) {
     return (
