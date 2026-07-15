@@ -15,12 +15,18 @@ const DEFAULT_MAX_POLAR_ANGLE = Math.PI - DEFAULT_MIN_POLAR_ANGLE;
 export class OrbitRotateTool extends BaseTool {
   static toolName = "OrbitRotate";
 
+  private animationFrameId: number | null = null;
+  private lastRenderTime = Number.NEGATIVE_INFINITY;
+  private pendingDelta: [number, number] = [0, 0];
+  private pendingElement: HTMLDivElement | null = null;
+
   constructor(
     toolProps: CornerstoneToolTypes.PublicToolProps = {},
     defaultToolProps: CornerstoneToolTypes.ToolProps = {
       supportedInteractionTypes: ["Mouse", "Touch"],
       configuration: {
         maxPolarAngle: DEFAULT_MAX_POLAR_ANGLE,
+        maxRenderFps: 30,
         minPolarAngle: DEFAULT_MIN_POLAR_ANGLE,
         rotateSpeed: 0.8,
         // Cornerstone volumes use DICOM patient coordinates, where Z is the
@@ -34,6 +40,16 @@ export class OrbitRotateTool extends BaseTool {
     this.touchDragCallback = this.dragCallback.bind(this);
   }
 
+  onSetToolDisabled = () => {
+    if (this.animationFrameId !== null) {
+      window.cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+    this.lastRenderTime = Number.NEGATIVE_INFINITY;
+    this.pendingDelta = [0, 0];
+    this.pendingElement = null;
+  };
+
   mouseDragCallback: (
     event: CornerstoneToolTypes.EventTypes.InteractionEventType,
   ) => void;
@@ -46,6 +62,34 @@ export class OrbitRotateTool extends BaseTool {
     event: CornerstoneToolTypes.EventTypes.InteractionEventType,
   ) {
     const { currentPoints, element, lastPoints } = event.detail;
+    this.pendingDelta[0] +=
+      currentPoints.canvas[0] - lastPoints.canvas[0];
+    this.pendingDelta[1] +=
+      currentPoints.canvas[1] - lastPoints.canvas[1];
+    this.pendingElement = element;
+
+    if (this.animationFrameId !== null) return;
+    this.animationFrameId = window.requestAnimationFrame(
+      this.flushPendingRotation,
+    );
+  }
+
+  private flushPendingRotation = (timestamp: number) => {
+    this.animationFrameId = null;
+    const minimumFrameInterval =
+      1000 / Math.max(1, this.configuration.maxRenderFps);
+    if (timestamp - this.lastRenderTime < minimumFrameInterval) {
+      this.animationFrameId = window.requestAnimationFrame(
+        this.flushPendingRotation,
+      );
+      return;
+    }
+
+    const element = this.pendingElement;
+    const delta = this.pendingDelta;
+    this.pendingDelta = [0, 0];
+    if (!element || (delta[0] === 0 && delta[1] === 0)) return;
+
     const enabledElement = getEnabledElement(element);
     if (!enabledElement) return;
     const { viewport } = enabledElement;
@@ -58,10 +102,7 @@ export class OrbitRotateTool extends BaseTool {
         position: [...camera.position] as OrbitVector3,
         viewUp: [...camera.viewUp] as OrbitVector3,
       },
-      [
-        currentPoints.canvas[0] - lastPoints.canvas[0],
-        currentPoints.canvas[1] - lastPoints.canvas[1],
-      ],
+      delta,
       element.clientHeight,
       {
         maxPolarAngle: this.configuration.maxPolarAngle,
@@ -73,5 +114,6 @@ export class OrbitRotateTool extends BaseTool {
 
     viewport.setCamera(nextCamera);
     viewport.render();
-  }
+    this.lastRenderTime = timestamp;
+  };
 }
