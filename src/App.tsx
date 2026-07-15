@@ -250,10 +250,9 @@ async function parseDicomHeader(file: File): Promise<DicomFileInfo> {
     throw new Error(`${file.name} does not contain a Series Instance UID.`);
   }
 
-  const imagePosition = parseNumberList(
-    dataSet.string("x00200032"),
-    3,
-  ) as Vector3 | undefined;
+  const imagePosition = parseNumberList(dataSet.string("x00200032"), 3) as
+    | Vector3
+    | undefined;
   const imageOrientation = parseNumberList(
     dataSet.string("x00200037"),
     6,
@@ -482,8 +481,7 @@ function getDicomSlicePlane(
     if (!file.imagePosition) return [];
     return [
       file.imagePosition.reduce(
-        (distance, value, coordinate) =>
-          distance + value * normal[coordinate],
+        (distance, value, coordinate) => distance + value * normal[coordinate],
         0,
       ),
     ];
@@ -491,16 +489,14 @@ function getDicomSlicePlane(
   if (!sliceDistances.length) return null;
 
   const currentDistance = current.imagePosition.reduce(
-    (distance, value, coordinate) =>
-      distance + value * normal[coordinate],
+    (distance, value, coordinate) => distance + value * normal[coordinate],
     0,
   );
   const seriesCenter =
     (Math.min(...sliceDistances) + Math.max(...sliceDistances)) / 2;
 
   return {
-    anatomicalCenterHeightFraction:
-      getAnatomicalCenterHeightFraction(current),
+    anatomicalCenterHeightFraction: getAnatomicalCenterHeightFraction(current),
     imageOrientation: current.imageOrientation,
     offsetFromSeriesCenterMm: currentDistance - seriesCenter,
     patientHeightMm: current.patientHeightMm,
@@ -662,17 +658,19 @@ function applyVolumePresentation(
 
   const volumeActor = viewport.getDefaultActor().actor as Types.VolumeActor;
   const opacityFunction = volumeActor.getProperty().getScalarOpacity(0);
-  const nodes = Array.from({ length: opacityFunction.getSize() }, (_, index) => {
-    const node = [0, 0, 0.5, 0];
-    opacityFunction.getNodeValue(index, node);
-    return node;
-  });
+  const nodes = Array.from(
+    { length: opacityFunction.getSize() },
+    (_, index) => {
+      const node = [0, 0, 0.5, 0];
+      opacityFunction.getNodeValue(index, node);
+      return node;
+    },
+  );
   if (!nodes.length) return;
 
   const minimum = nodes[0][0];
   const maximum = nodes[nodes.length - 1][0];
-  const threshold =
-    minimum + (maximum - minimum) * (opacityThreshold / 100);
+  const threshold = minimum + (maximum - minimum) * (opacityThreshold / 100);
 
   opacityFunction.removeAllPoints();
   opacityFunction.addPoint(minimum, 0);
@@ -680,12 +678,7 @@ function applyVolumePresentation(
   nodes
     .filter(([intensity]) => intensity > threshold)
     .forEach(([intensity, opacity, midpoint, sharpness]) => {
-      opacityFunction.addPointLong(
-        intensity,
-        opacity,
-        midpoint,
-        sharpness,
-      );
+      opacityFunction.addPointLong(intensity, opacity, midpoint, sharpness);
     });
 }
 
@@ -849,9 +842,10 @@ function App() {
             return;
           }
 
-          const viewport = renderingEngine.getViewport<
-            InstanceType<typeof LegacyVolumeViewport3D>
-          >(VIEWPORT_ID);
+          const viewport =
+            renderingEngine.getViewport<
+              InstanceType<typeof LegacyVolumeViewport3D>
+            >(VIEWPORT_ID);
           // Resizing can recreate the VTK viewport/mapper state. Reattach the
           // saved world-space crop planes even while the interactive crop tool
           // is disabled, otherwise the stale mapper can clip the whole volume.
@@ -955,7 +949,9 @@ function App() {
           exampleFiles.map((item) => item.info.seriesInstanceUid),
         );
         if (seriesInstanceUids.size !== 1) {
-          throw new Error(`${entry.label} contains more than one DICOM series.`);
+          throw new Error(
+            `${entry.label} contains more than one DICOM series.`,
+          );
         }
 
         const urlByFileName = new Map(
@@ -1015,7 +1011,8 @@ function App() {
         const response = await fetch(manifestUrl, {
           signal: abortController.signal,
         });
-        if (!response.ok) throw new Error("Example manifest could not be loaded.");
+        if (!response.ok)
+          throw new Error("Example manifest could not be loaded.");
 
         const manifest = (await response.json()) as ExampleSeriesManifest;
         const results = await Promise.allSettled(
@@ -1117,7 +1114,7 @@ function App() {
             file.pixelSpacing &&
             file.rows &&
             file.columns,
-      );
+        );
       if (!hasVolumeGeometry) {
         await displayStack(renderingEngine, element);
         return {
@@ -1232,166 +1229,172 @@ function App() {
     });
   }, []);
 
-  const selectSeries = useCallback(async (seriesId: string) => {
-    if (seriesId === activeSeriesIdRef.current) return;
+  const selectSeries = useCallback(
+    async (seriesId: string) => {
+      if (seriesId === activeSeriesIdRef.current) return;
 
-    const series = seriesListRef.current.find((item) => item.id === seriesId);
-    const renderingEngine = renderingEngineRef.current;
-    if (!series || !renderingEngine) return;
+      const series = seriesListRef.current.find((item) => item.id === seriesId);
+      const renderingEngine = renderingEngineRef.current;
+      if (!series || !renderingEngine) return;
 
-    const generation = ++loadGenerationRef.current;
-    navigationGenerationRef.current += 1;
-    releaseImageIds(pendingImageIdsRef.current);
-    pendingImageIdsRef.current = [];
-    setIsLoading(true);
-    setLoadingMessage("Displaying series…");
-    setError(null);
+      const generation = ++loadGenerationRef.current;
+      navigationGenerationRef.current += 1;
+      releaseImageIds(pendingImageIdsRef.current);
+      pendingImageIdsRef.current = [];
+      setIsLoading(true);
+      setLoadingMessage("Displaying series…");
+      setError(null);
 
-    try {
-      const result = await displaySeries(series, viewModeRef.current);
-      if (generation !== loadGenerationRef.current) return;
+      try {
+        const result = await displaySeries(series, viewModeRef.current);
+        if (generation !== loadGenerationRef.current) return;
 
-      viewModeRef.current = result.mode;
-      activeSeriesIdRef.current = series.id;
-      imageIdsRef.current = series.imageIds;
-      currentIndexRef.current = series.currentIndex;
-      setViewMode(result.mode);
-      if (result.mode === "volume") {
-        setVolumePreset(result.preset);
-        setOpacityThreshold(result.opacityThreshold);
+        viewModeRef.current = result.mode;
+        activeSeriesIdRef.current = series.id;
+        imageIdsRef.current = series.imageIds;
+        currentIndexRef.current = series.currentIndex;
+        setViewMode(result.mode);
+        if (result.mode === "volume") {
+          setVolumePreset(result.preset);
+          setOpacityThreshold(result.opacityThreshold);
+        }
+        setActiveSeriesId(series.id);
+        setCurrentIndex(series.currentIndex);
+        setImageCount(series.imageIds.length);
+        setSeriesFiles(series.files);
+        setError(result.warning);
+      } catch (selectionError) {
+        if (generation === loadGenerationRef.current) {
+          setError(getErrorMessage(selectionError));
+        }
+      } finally {
+        if (generation === loadGenerationRef.current) setIsLoading(false);
       }
-      setActiveSeriesId(series.id);
-      setCurrentIndex(series.currentIndex);
-      setImageCount(series.imageIds.length);
-      setSeriesFiles(series.files);
-      setError(result.warning);
-    } catch (selectionError) {
-      if (generation === loadGenerationRef.current) {
-        setError(getErrorMessage(selectionError));
+    },
+    [displaySeries],
+  );
+
+  const openFiles = useCallback(
+    async (files: File[]) => {
+      if (!files.length) return;
+
+      const renderingEngine = renderingEngineRef.current;
+      if (!renderingEngine) {
+        setError("The viewer is still starting. Please try again in a moment.");
+        return;
       }
-    } finally {
-      if (generation === loadGenerationRef.current) setIsLoading(false);
-    }
-  }, [displaySeries]);
 
-  const openFiles = useCallback(async (files: File[]) => {
-    if (!files.length) return;
+      const generation = ++loadGenerationRef.current;
+      navigationGenerationRef.current += 1;
+      releaseImageIds(pendingImageIdsRef.current);
+      pendingImageIdsRef.current = [];
+      setIsLoading(true);
+      setLoadingMessage("Reading DICOM headers…");
+      setError(null);
 
-    const renderingEngine = renderingEngineRef.current;
-    if (!renderingEngine) {
-      setError("The viewer is still starting. Please try again in a moment.");
-      return;
-    }
+      let candidateImageIds: string[] = [];
 
-    const generation = ++loadGenerationRef.current;
-    navigationGenerationRef.current += 1;
-    releaseImageIds(pendingImageIdsRef.current);
-    pendingImageIdsRef.current = [];
-    setIsLoading(true);
-    setLoadingMessage("Reading DICOM headers…");
-    setError(null);
+      try {
+        const dicomFiles = await readDicomHeaders(files);
+        if (generation !== loadGenerationRef.current) return;
 
-    let candidateImageIds: string[] = [];
-
-    try {
-      const dicomFiles = await readDicomHeaders(files);
-      if (generation !== loadGenerationRef.current) return;
-
-      const seriesInstanceUids = new Set(
-        dicomFiles.map((item) => item.seriesInstanceUid),
-      );
-      if (seriesInstanceUids.size !== 1) {
-        throw new Error(
-          "The dropped files contain more than one DICOM series. Drop one series at a time.",
+        const seriesInstanceUids = new Set(
+          dicomFiles.map((item) => item.seriesInstanceUid),
         );
-      }
+        if (seriesInstanceUids.size !== 1) {
+          throw new Error(
+            "The dropped files contain more than one DICOM series. Drop one series at a time.",
+          );
+        }
 
-      const sortedDicomFiles = sortDicomFiles(dicomFiles);
-      const sortedFiles = sortedDicomFiles.map((item) => item.file);
+        const sortedDicomFiles = sortDicomFiles(dicomFiles);
+        const sortedFiles = sortedDicomFiles.map((item) => item.file);
 
-      candidateImageIds = sortedFiles.map((file) =>
-        wadouri.fileManager.add(file),
-      );
-      pendingImageIdsRef.current = candidateImageIds;
-      const initialIndex = Math.floor(candidateImageIds.length / 2);
+        candidateImageIds = sortedFiles.map((file) =>
+          wadouri.fileManager.add(file),
+        );
+        pendingImageIdsRef.current = candidateImageIds;
+        const initialIndex = Math.floor(candidateImageIds.length / 2);
 
-      setLoadingMessage("Decoding first image…");
-      const middleImage = await withTimeout(
-        imageLoader.loadAndCacheImage(candidateImageIds[initialIndex]),
-        "The first image took too long to decode. Check that the files contain DICOM pixel data.",
-        () => releaseImageIds(candidateImageIds),
-      );
-      if (generation !== loadGenerationRef.current) {
+        setLoadingMessage("Decoding first image…");
+        const middleImage = await withTimeout(
+          imageLoader.loadAndCacheImage(candidateImageIds[initialIndex]),
+          "The first image took too long to decode. Check that the files contain DICOM pixel data.",
+          () => releaseImageIds(candidateImageIds),
+        );
+        if (generation !== loadGenerationRef.current) {
+          releaseImageIds(candidateImageIds);
+          return;
+        }
+
+        const thumbnailUrl = await createSeriesThumbnail(
+          middleImage,
+          sortedDicomFiles[initialIndex]?.modality,
+        );
+        if (generation !== loadGenerationRef.current) {
+          releaseImageIds(candidateImageIds);
+          return;
+        }
+
+        const firstFile = sortedDicomFiles[0];
+        const newSeries: DicomSeries = {
+          id: `${firstFile.seriesInstanceUid}-${++nextSeriesIdRef.current}`,
+          files: sortedDicomFiles,
+          imageIds: candidateImageIds,
+          currentIndex: initialIndex,
+          imageCount: candidateImageIds.length,
+          label:
+            firstFile.seriesDescription ||
+            firstFile.studyDescription ||
+            `Series ${seriesListRef.current.length + 1}`,
+          modality: firstFile.modality,
+          seriesInstanceUid: firstFile.seriesInstanceUid,
+          thumbnailUrl,
+        };
+
+        setLoadingMessage(
+          viewModeRef.current === "volume"
+            ? "Building 3D volume…"
+            : "Displaying series…",
+        );
+        const result = await displaySeries(newSeries, viewModeRef.current);
+        if (generation !== loadGenerationRef.current) {
+          releaseImageIds(candidateImageIds);
+          return;
+        }
+
+        const nextSeriesList = [...seriesListRef.current, newSeries];
+        seriesListRef.current = nextSeriesList;
+        imageIdsRef.current = candidateImageIds;
+        pendingImageIdsRef.current = [];
+        activeSeriesIdRef.current = newSeries.id;
+        currentIndexRef.current = initialIndex;
+        viewModeRef.current = result.mode;
+        setSeriesList(nextSeriesList);
+        setActiveSeriesId(newSeries.id);
+        setViewMode(result.mode);
+        if (result.mode === "volume") {
+          setVolumePreset(result.preset);
+          setOpacityThreshold(result.opacityThreshold);
+        }
+        setCurrentIndex(initialIndex);
+        setImageCount(candidateImageIds.length);
+        setSeriesFiles(sortedDicomFiles);
+        setError(result.warning);
+      } catch (loadError) {
+        if (generation !== loadGenerationRef.current) {
+          releaseImageIds(candidateImageIds);
+          return;
+        }
         releaseImageIds(candidateImageIds);
-        return;
+        pendingImageIdsRef.current = [];
+        setError(getErrorMessage(loadError));
+      } finally {
+        if (generation === loadGenerationRef.current) setIsLoading(false);
       }
-
-      const thumbnailUrl = await createSeriesThumbnail(
-        middleImage,
-        sortedDicomFiles[initialIndex]?.modality,
-      );
-      if (generation !== loadGenerationRef.current) {
-        releaseImageIds(candidateImageIds);
-        return;
-      }
-
-      const firstFile = sortedDicomFiles[0];
-      const newSeries: DicomSeries = {
-        id: `${firstFile.seriesInstanceUid}-${++nextSeriesIdRef.current}`,
-        files: sortedDicomFiles,
-        imageIds: candidateImageIds,
-        currentIndex: initialIndex,
-        imageCount: candidateImageIds.length,
-        label:
-          firstFile.seriesDescription ||
-          firstFile.studyDescription ||
-          `Series ${seriesListRef.current.length + 1}`,
-        modality: firstFile.modality,
-        seriesInstanceUid: firstFile.seriesInstanceUid,
-        thumbnailUrl,
-      };
-
-      setLoadingMessage(
-        viewModeRef.current === "volume"
-          ? "Building 3D volume…"
-          : "Displaying series…",
-      );
-      const result = await displaySeries(newSeries, viewModeRef.current);
-      if (generation !== loadGenerationRef.current) {
-        releaseImageIds(candidateImageIds);
-        return;
-      }
-
-      const nextSeriesList = [...seriesListRef.current, newSeries];
-      seriesListRef.current = nextSeriesList;
-      imageIdsRef.current = candidateImageIds;
-      pendingImageIdsRef.current = [];
-      activeSeriesIdRef.current = newSeries.id;
-      currentIndexRef.current = initialIndex;
-      viewModeRef.current = result.mode;
-      setSeriesList(nextSeriesList);
-      setActiveSeriesId(newSeries.id);
-      setViewMode(result.mode);
-      if (result.mode === "volume") {
-        setVolumePreset(result.preset);
-        setOpacityThreshold(result.opacityThreshold);
-      }
-      setCurrentIndex(initialIndex);
-      setImageCount(candidateImageIds.length);
-      setSeriesFiles(sortedDicomFiles);
-      setError(result.warning);
-    } catch (loadError) {
-      if (generation !== loadGenerationRef.current) {
-        releaseImageIds(candidateImageIds);
-        return;
-      }
-      releaseImageIds(candidateImageIds);
-      pendingImageIdsRef.current = [];
-      setError(getErrorMessage(loadError));
-    } finally {
-      if (generation === loadGenerationRef.current) setIsLoading(false);
-    }
-  }, [displaySeries]);
+    },
+    [displaySeries],
+  );
 
   function handleFileSelection(event: ChangeEvent<HTMLInputElement>) {
     void openFiles(Array.from(event.target.files || []));
@@ -1439,11 +1442,7 @@ function App() {
     const series = seriesListRef.current.find(
       (item) => item.id === activeSeriesIdRef.current,
     );
-    if (
-      !renderingEngine ||
-      !series ||
-      viewModeRef.current !== "volume"
-    ) {
+    if (!renderingEngine || !series || viewModeRef.current !== "volume") {
       return;
     }
 
@@ -1478,11 +1477,7 @@ function App() {
     const series = seriesListRef.current.find(
       (item) => item.id === activeSeriesIdRef.current,
     );
-    if (
-      !renderingEngine ||
-      !series ||
-      viewModeRef.current !== "volume"
-    ) {
+    if (!renderingEngine || !series || viewModeRef.current !== "volume") {
       return;
     }
 
@@ -1510,11 +1505,7 @@ function App() {
     const series = seriesListRef.current.find(
       (item) => item.id === activeSeriesIdRef.current,
     );
-    if (
-      !renderingEngine ||
-      !series ||
-      viewModeRef.current !== "volume"
-    ) {
+    if (!renderingEngine || !series || viewModeRef.current !== "volume") {
       return;
     }
 
@@ -1571,7 +1562,7 @@ function App() {
           recenterCamera(viewport, cropCenter);
           viewport.render();
         }
-        toolGroup.setToolDisabled(TouchVolumeCroppingTool.toolName);
+        toolGroup.setToolEnabled(TouchVolumeCroppingTool.toolName);
         toolGroup.setToolActive(OrbitRotateTool.toolName, {
           bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
         });
@@ -1841,36 +1832,36 @@ function App() {
             >
               <div ref={viewportElementRef} className="absolute inset-0" />
 
-                {imageCount > 0 && (
-                  <div className="absolute right-3 top-3 z-10 flex rounded-md border border-white/10 bg-black/70 p-1 backdrop-blur-sm">
-                    <Button
-                      className="h-8 gap-1.5 px-2.5"
-                      variant={viewMode === "stack" ? "secondary" : "ghost"}
-                      size="sm"
-                      disabled={isLoading}
-                      aria-pressed={viewMode === "stack"}
-                      onClick={() => void switchViewMode("stack")}
-                    >
-                      <Rows3 className="size-3.5" />
-                      2D
-                    </Button>
-                    <Button
-                      className="h-8 gap-1.5 px-2.5"
-                      variant={viewMode === "volume" ? "secondary" : "ghost"}
-                      size="sm"
-                      disabled={isLoading}
-                      aria-pressed={viewMode === "volume"}
-                      onClick={() => void switchViewMode("volume")}
-                    >
-                      <Box className="size-3.5" />
-                      3D
-                    </Button>
-                  </div>
-                )}
+              {imageCount > 0 && (
+                <div className="absolute right-3 top-3 z-10 flex rounded-md border border-white/10 bg-black/70 p-1 backdrop-blur-sm">
+                  <Button
+                    className="h-8 gap-1.5 px-2.5"
+                    variant={viewMode === "stack" ? "secondary" : "ghost"}
+                    size="sm"
+                    disabled={isLoading}
+                    aria-pressed={viewMode === "stack"}
+                    onClick={() => void switchViewMode("stack")}
+                  >
+                    <Rows3 className="size-3.5" />
+                    2D
+                  </Button>
+                  <Button
+                    className="h-8 gap-1.5 px-2.5"
+                    variant={viewMode === "volume" ? "secondary" : "ghost"}
+                    size="sm"
+                    disabled={isLoading}
+                    aria-pressed={viewMode === "volume"}
+                    onClick={() => void switchViewMode("volume")}
+                  >
+                    <Box className="size-3.5" />
+                    3D
+                  </Button>
+                </div>
+              )}
 
-                {imageCount > 0 &&
-                  viewMode === "volume" &&
-                  isVolumeOptionsOpen && (
+              {imageCount > 0 &&
+                viewMode === "volume" &&
+                isVolumeOptionsOpen && (
                   <div className="absolute inset-x-2 top-16 z-10 w-auto rounded-md border border-white/10 bg-black/70 p-2.5 text-white/80 backdrop-blur-sm md:inset-x-auto md:left-3 md:top-3 md:w-[min(22rem,calc(100%-9rem))]">
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <div className="whitespace-nowrap text-xs font-medium text-white/90">
@@ -1961,73 +1952,73 @@ function App() {
                   </div>
                 )}
 
-                {imageCount > 0 &&
-                  viewMode === "volume" &&
-                  !isVolumeOptionsOpen && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="xs"
-                      className="absolute left-3 top-3 z-10 h-10 gap-1.5 border-white/10 bg-black/70 px-3 text-sm text-white/70 backdrop-blur-sm hover:bg-black/80 hover:text-white @max-[18rem]:size-10 @max-[18rem]:gap-0 @max-[18rem]:px-0"
-                      aria-label="Open 3D rendering options"
-                      title="3D rendering options"
-                      onClick={() => setIsVolumeOptionsOpen(true)}
-                    >
-                      <SlidersHorizontal className="size-4" />
-                      <span className="@max-[18rem]:hidden">Options</span>
-                    </Button>
-                  )}
+              {imageCount > 0 &&
+                viewMode === "volume" &&
+                !isVolumeOptionsOpen && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    className="absolute left-3 top-3 z-10 h-10 gap-1.5 border-white/10 bg-black/70 px-3 text-sm text-white/70 backdrop-blur-sm hover:bg-black/80 hover:text-white @max-[18rem]:size-10 @max-[18rem]:gap-0 @max-[18rem]:px-0"
+                    aria-label="Open 3D rendering options"
+                    title="3D rendering options"
+                    onClick={() => setIsVolumeOptionsOpen(true)}
+                  >
+                    <SlidersHorizontal className="size-4" />
+                    <span className="@max-[18rem]:hidden">Options</span>
+                  </Button>
+                )}
 
-                {!imageCount && !isLoading && (
-                  <div className="pointer-events-none absolute inset-0 grid place-items-center p-6">
-                    <div className="text-center">
-                      <FileImage className="mx-auto size-7 text-muted-foreground" />
-                      <p className="mt-3 text-sm text-muted-foreground">
-                        {isReady
-                          ? "Drop a DICOM series to begin"
-                          : "Starting viewer…"}
-                      </p>
-                      {isReady && (
-                        <Button
-                          className="pointer-events-auto mt-4"
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => fileInputRef.current?.click()}
-                        >
-                          Choose files
-                        </Button>
-                      )}
-                    </div>
+              {!imageCount && !isLoading && (
+                <div className="pointer-events-none absolute inset-0 grid place-items-center p-6">
+                  <div className="text-center">
+                    <FileImage className="mx-auto size-7 text-muted-foreground" />
+                    <p className="mt-3 text-sm text-muted-foreground">
+                      {isReady
+                        ? "Drop a DICOM series to begin"
+                        : "Starting viewer…"}
+                    </p>
+                    {isReady && (
+                      <Button
+                        className="pointer-events-auto mt-4"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        Choose files
+                      </Button>
+                    )}
                   </div>
-                )}
+                </div>
+              )}
 
-                {isLoading && (
-                  <div className="absolute inset-0 grid place-items-center bg-black/80">
-                    <div className="text-center">
-                      <Loader2 className="mx-auto size-5 animate-spin" />
-                      <p className="mt-3 text-sm text-muted-foreground">
-                        {loadingMessage}
-                      </p>
-                    </div>
+              {isLoading && (
+                <div className="absolute inset-0 grid place-items-center bg-black/80">
+                  <div className="text-center">
+                    <Loader2 className="mx-auto size-5 animate-spin" />
+                    <p className="mt-3 text-sm text-muted-foreground">
+                      {loadingMessage}
+                    </p>
                   </div>
-                )}
+                </div>
+              )}
 
-                {error && !isLoading && (
-                  <Card className="absolute left-1/2 top-4 w-[min(28rem,calc(100%-2rem))] -translate-x-1/2 border-destructive/50 bg-background shadow-none">
-                    <CardContent className="flex gap-2.5 p-3 text-sm">
-                      <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
-                      <p>{error}</p>
-                    </CardContent>
-                  </Card>
-                )}
+              {error && !isLoading && (
+                <Card className="absolute left-1/2 top-4 w-[min(28rem,calc(100%-2rem))] -translate-x-1/2 border-destructive/50 bg-background shadow-none">
+                  <CardContent className="flex gap-2.5 p-3 text-sm">
+                    <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
+                    <p>{error}</p>
+                  </CardContent>
+                </Card>
+              )}
 
-                {imageCount > 0 && viewMode === "stack" && (
-                  <DicomMetadataOverlay
-                    metadata={seriesFiles[currentIndex]}
-                    currentIndex={currentIndex}
-                    imageCount={imageCount}
-                  />
-                )}
+              {imageCount > 0 && viewMode === "stack" && (
+                <DicomMetadataOverlay
+                  metadata={seriesFiles[currentIndex]}
+                  currentIndex={currentIndex}
+                  imageCount={imageCount}
+                />
+              )}
             </div>
           </div>
 
