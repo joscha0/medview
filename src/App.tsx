@@ -20,7 +20,6 @@ import {
   Enums as ToolEnums,
   init as initCornerstoneTools,
   ToolGroupManager,
-  VolumeCroppingTool,
   ZoomTool,
 } from "@cornerstonejs/tools";
 import {
@@ -70,6 +69,7 @@ import {
   type SeriesPickerItem,
 } from "@/components/series-picker";
 import { OrbitRotateTool } from "@/tools/orbit-rotate-tool";
+import { TouchVolumeCroppingTool } from "@/tools/touch-volume-cropping-tool";
 
 const RENDERING_ENGINE_ID = "medview-rendering-engine";
 const VIEWPORT_ID = "medview-stack-viewport";
@@ -157,7 +157,7 @@ function initializeCornerstone() {
       });
       initCornerstoneTools();
       addTool(OrbitRotateTool);
-      addTool(VolumeCroppingTool);
+      addTool(TouchVolumeCroppingTool);
       addTool(ZoomTool);
     });
   }
@@ -708,12 +708,12 @@ function setVolumeToolsActive(active: boolean) {
 
   if (!active) {
     toolGroup.setToolDisabled(OrbitRotateTool.toolName);
-    toolGroup.setToolDisabled(VolumeCroppingTool.toolName);
+    toolGroup.setToolDisabled(TouchVolumeCroppingTool.toolName);
     toolGroup.setToolDisabled(ZoomTool.toolName);
     return;
   }
 
-  toolGroup.setToolDisabled(VolumeCroppingTool.toolName);
+  toolGroup.setToolDisabled(TouchVolumeCroppingTool.toolName);
   toolGroup.setToolActive(OrbitRotateTool.toolName, {
     bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
   });
@@ -727,8 +727,8 @@ function setVolumeToolsActive(active: boolean) {
 
 function getVolumeCroppingTool() {
   return ToolGroupManager.getToolGroup(TOOL_GROUP_ID)?.getToolInstance(
-    VolumeCroppingTool.toolName,
-  ) as VolumeCroppingTool | undefined;
+    TouchVolumeCroppingTool.toolName,
+  ) as TouchVolumeCroppingTool | undefined;
 }
 
 function forgetVolumeCropState() {
@@ -828,7 +828,7 @@ function App() {
 
         const toolGroup = ToolGroupManager.createToolGroup(TOOL_GROUP_ID);
         toolGroup?.addTool(OrbitRotateTool.toolName);
-        toolGroup?.addTool(VolumeCroppingTool.toolName, {
+        toolGroup?.addTool(TouchVolumeCroppingTool.toolName, {
           initialCropFactor: 0.001,
           showClippingPlanes: false,
           showHandles: false,
@@ -1553,7 +1553,7 @@ function App() {
           recenterCamera(viewport, cropCenter);
           viewport.render();
         }
-        toolGroup.setToolDisabled(VolumeCroppingTool.toolName);
+        toolGroup.setToolDisabled(TouchVolumeCroppingTool.toolName);
         toolGroup.setToolActive(OrbitRotateTool.toolName, {
           bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
         });
@@ -1563,8 +1563,11 @@ function App() {
 
       if (hasCrop) {
         toolGroup.setToolDisabled(OrbitRotateTool.toolName);
-        toolGroup.setToolActive(VolumeCroppingTool.toolName, {
-          bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
+        toolGroup.setToolActive(TouchVolumeCroppingTool.toolName, {
+          bindings: [
+            { mouseButton: ToolEnums.MouseBindings.Primary },
+            { numTouchPoints: 1 },
+          ],
         });
         croppingTool.setClippingPlanesVisible(true);
         croppingTool.setHandlesVisible(true);
@@ -1573,8 +1576,11 @@ function App() {
       }
 
       toolGroup.setToolDisabled(OrbitRotateTool.toolName);
-      toolGroup.setToolActive(VolumeCroppingTool.toolName, {
-        bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
+      toolGroup.setToolActive(TouchVolumeCroppingTool.toolName, {
+        bindings: [
+          { mouseButton: ToolEnums.MouseBindings.Primary },
+          { numTouchPoints: 1 },
+        ],
       });
       croppingTool.setClippingPlanesVisible(true);
       croppingTool.setHandlesVisible(true);
@@ -1653,7 +1659,7 @@ function App() {
         recenterCamera(viewport, series.initialVolumeCamera.focalPoint);
       }
 
-      toolGroup.setToolDisabled(VolumeCroppingTool.toolName);
+      toolGroup.setToolDisabled(TouchVolumeCroppingTool.toolName);
       toolGroup.setToolActive(OrbitRotateTool.toolName, {
         bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
       });
