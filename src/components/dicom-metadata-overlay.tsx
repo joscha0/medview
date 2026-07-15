@@ -57,7 +57,11 @@ export function DicomMetadataOverlay({
   currentIndex,
   imageCount,
 }: DicomMetadataOverlayProps) {
-  const [isOpen, setIsOpen] = useState(true);
+  const [isOpen, setIsOpen] = useState(
+    () =>
+      typeof window === "undefined" ||
+      window.matchMedia("(min-width: 1024px)").matches,
+  );
   const patientName = formatPatientName(metadata?.patientName);
   const patientDetails = joinMetadata([
     metadata?.patientId ? `ID ${metadata.patientId}` : undefined,

@@ -748,7 +748,11 @@ function App() {
   const [viewMode, setViewMode] = useState<ViewMode>("stack");
   const [volumePreset, setVolumePreset] = useState("CT-Bone");
   const [opacityThreshold, setOpacityThreshold] = useState(0);
-  const [isVolumeOptionsOpen, setIsVolumeOptionsOpen] = useState(true);
+  const [isVolumeOptionsOpen, setIsVolumeOptionsOpen] = useState(
+    () =>
+      typeof window === "undefined" ||
+      window.matchMedia("(min-width: 1024px)").matches,
+  );
   const [isCropping, setIsCropping] = useState(false);
   const [hasCrop, setHasCrop] = useState(false);
   const [isLoadingExamples, setIsLoadingExamples] = useState(false);
