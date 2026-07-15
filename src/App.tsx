@@ -1641,21 +1641,30 @@ function App() {
             ref={viewerPanelsRef}
             className="grid min-h-0 flex-1"
             style={{
-              gridTemplateRows: `minmax(${MIN_VIEWER_PANEL_HEIGHT}px, ${anatomyPanelSize}fr) auto minmax(${MIN_VIEWER_PANEL_HEIGHT}px, ${100 - anatomyPanelSize}fr)`,
+              gridTemplateRows:
+                viewMode === "stack"
+                  ? `minmax(${MIN_VIEWER_PANEL_HEIGHT}px, ${anatomyPanelSize}fr) auto minmax(${MIN_VIEWER_PANEL_HEIGHT}px, ${100 - anatomyPanelSize}fr)`
+                  : "minmax(0, 1fr)",
             }}
           >
-            <AnatomyViewer slicePlane={slicePlane} />
+            {viewMode === "stack" && (
+              <>
+                <AnatomyViewer slicePlane={slicePlane} />
 
-            <PanelResizeHandle
-              containerRef={viewerPanelsRef}
-              label="Resize anatomy and DICOM viewer panels"
-              minFirstSize={MIN_VIEWER_PANEL_HEIGHT}
-              minSecondSize={MIN_VIEWER_PANEL_HEIGHT}
-              orientation="horizontal"
-              value={anatomyPanelSize}
-              onChange={setAnatomyPanelSize}
-              onReset={() => setAnatomyPanelSize(DEFAULT_ANATOMY_PANEL_SIZE)}
-            />
+                <PanelResizeHandle
+                  containerRef={viewerPanelsRef}
+                  label="Resize anatomy and DICOM viewer panels"
+                  minFirstSize={MIN_VIEWER_PANEL_HEIGHT}
+                  minSecondSize={MIN_VIEWER_PANEL_HEIGHT}
+                  orientation="horizontal"
+                  value={anatomyPanelSize}
+                  onChange={setAnatomyPanelSize}
+                  onReset={() =>
+                    setAnatomyPanelSize(DEFAULT_ANATOMY_PANEL_SIZE)
+                  }
+                />
+              </>
+            )}
 
             <div
               className="relative min-h-0 min-w-0 overflow-hidden bg-black outline-none focus-visible:ring-2 focus-visible:ring-ring"
