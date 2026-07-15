@@ -2,9 +2,12 @@ import {
   cache,
   Enums,
   imageLoader,
+  LegacyVolumeViewport3D,
   RenderingEngine,
+  setVolumesForViewports,
   StackViewport,
   utilities,
+  volumeLoader,
   init as initCornerstoneCore,
 } from "@cornerstonejs/core";
 import {
@@ -12,16 +15,27 @@ import {
   wadouri,
 } from "@cornerstonejs/dicom-image-loader";
 import {
+  addTool,
+  Enums as ToolEnums,
+  init as initCornerstoneTools,
+  ToolGroupManager,
+  TrackballRotateTool,
+  ZoomTool,
+} from "@cornerstonejs/tools";
+import {
   Enums as MetadataEnums,
   utilities as metadataUtilities,
 } from "@cornerstonejs/metadata";
 import { parseDicom, type DataSet } from "dicom-parser";
 import {
   AlertCircle,
+  Box,
   ChevronLeft,
   ChevronRight,
   FileImage,
   Loader2,
+  RotateCcw,
+  Rows3,
   Upload,
 } from "lucide-react";
 import {
@@ -54,6 +68,7 @@ import {
 
 const RENDERING_ENGINE_ID = "medview-rendering-engine";
 const VIEWPORT_ID = "medview-stack-viewport";
+const TOOL_GROUP_ID = "medview-volume-tools";
 const LOAD_TIMEOUT_MS = 30_000;
 const HEADER_READ_SIZE = 1024 * 1024;
 const EXAMPLE_HEADER_READ_SIZE = 64 * 1024;
@@ -68,6 +83,7 @@ const fileNameCollator = new Intl.Collator(undefined, {
 let initializationPromise: Promise<void> | undefined;
 
 type Vector3 = [number, number, number];
+type ViewMode = "stack" | "volume";
 
 type DicomFileInfo = DicomMetadata & {
   file: File;
@@ -108,6 +124,9 @@ function initializeCornerstone() {
           Math.min(navigator.hardwareConcurrency || 1, 4),
         ),
       });
+      initCornerstoneTools();
+      addTool(TrackballRotateTool);
+      addTool(ZoomTool);
     });
   }
 
@@ -534,12 +553,61 @@ function getErrorMessage(error: unknown): string {
   return "The selected files could not be opened as a DICOM series.";
 }
 
+function removeCachedVolume(volumeId: string | null) {
+  if (!volumeId) return;
+  const volume = cache.getVolume(volumeId);
+  if (!volume) return;
+
+  if ("cancelLoading" in volume) volume.cancelLoading();
+  try {
+    cache.removeVolumeLoadObject(volumeId);
+  } catch {
+    // A concurrent mode or series change may already have removed it.
+  }
+}
+
+function setVolumeToolsActive(active: boolean) {
+  const toolGroup = ToolGroupManager.getToolGroup(TOOL_GROUP_ID);
+  if (!toolGroup) return;
+
+  if (!active) {
+    toolGroup.setToolDisabled(TrackballRotateTool.toolName);
+    toolGroup.setToolDisabled(ZoomTool.toolName);
+    return;
+  }
+
+  toolGroup.setToolActive(TrackballRotateTool.toolName, {
+    bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
+  });
+  toolGroup.setToolActive(ZoomTool.toolName, {
+    bindings: [{ mouseButton: ToolEnums.MouseBindings.Wheel }],
+  });
+}
+
+function bindToolsToViewport() {
+  const toolGroup = ToolGroupManager.getToolGroup(TOOL_GROUP_ID);
+  if (!toolGroup) return;
+
+  const isAlreadyBound = toolGroup
+    .getViewportsInfo()
+    .some(
+      (viewport) =>
+        viewport.viewportId === VIEWPORT_ID &&
+        viewport.renderingEngineId === RENDERING_ENGINE_ID,
+    );
+  if (!isAlreadyBound) {
+    toolGroup.addViewport(VIEWPORT_ID, RENDERING_ENGINE_ID);
+  }
+}
+
 function App() {
   const viewportElementRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const renderingEngineRef = useRef<RenderingEngine | null>(null);
+  const activeVolumeIdRef = useRef<string | null>(null);
   const currentIndexRef = useRef(0);
   const imageIdsRef = useRef<string[]>([]);
+  const viewModeRef = useRef<ViewMode>("stack");
   const dragDepthRef = useRef(0);
   const loadGenerationRef = useRef(0);
   const navigationGenerationRef = useRef(0);
@@ -559,6 +627,7 @@ function App() {
   const [seriesFiles, setSeriesFiles] = useState<DicomFileInfo[]>([]);
   const [seriesList, setSeriesList] = useState<DicomSeries[]>([]);
   const [activeSeriesId, setActiveSeriesId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("stack");
   const [isLoadingExamples, setIsLoadingExamples] = useState(false);
   const [anatomyPanelSize, setAnatomyPanelSize] = useState(
     DEFAULT_ANATOMY_PANEL_SIZE,
@@ -586,6 +655,12 @@ function App() {
         });
         renderingEngineRef.current = renderingEngine;
 
+        const toolGroup = ToolGroupManager.createToolGroup(TOOL_GROUP_ID);
+        toolGroup?.addTool(TrackballRotateTool.toolName);
+        toolGroup?.addTool(ZoomTool.toolName);
+        toolGroup?.addViewport(VIEWPORT_ID, RENDERING_ENGINE_ID);
+        setVolumeToolsActive(false);
+
         resizeObserver = new ResizeObserver(() => {
           renderingEngine.resize(true, true);
         });
@@ -603,8 +678,11 @@ function App() {
       loadGenerationRef.current += 1;
       navigationGenerationRef.current += 1;
       resizeObserver?.disconnect();
+      ToolGroupManager.destroyToolGroup(TOOL_GROUP_ID);
       renderingEngineRef.current?.destroy();
       renderingEngineRef.current = null;
+      removeCachedVolume(activeVolumeIdRef.current);
+      activeVolumeIdRef.current = null;
       releaseImageIds(pendingImageIdsRef.current);
       seriesListRef.current.forEach((series) =>
         releaseImageIds(series.imageIds),
@@ -747,10 +825,131 @@ function App() {
     };
   }, [isReady]);
 
+  const displaySeries = useCallback(
+    async (series: DicomSeries, requestedMode: ViewMode) => {
+      const renderingEngine = renderingEngineRef.current;
+      const element = viewportElementRef.current;
+      if (!renderingEngine || !element) {
+        throw new Error("The viewer is not ready yet.");
+      }
+
+      async function displayStack(
+        activeRenderingEngine: RenderingEngine,
+        viewportElement: HTMLDivElement,
+      ) {
+        setVolumeToolsActive(false);
+        activeRenderingEngine.disableElement(VIEWPORT_ID);
+        removeCachedVolume(activeVolumeIdRef.current);
+        activeVolumeIdRef.current = null;
+        activeRenderingEngine.enableElement({
+          viewportId: VIEWPORT_ID,
+          type: Enums.ViewportType.STACK,
+          element: viewportElement,
+          defaultOptions: { background: [0, 0, 0] },
+        });
+        bindToolsToViewport();
+
+        const viewport =
+          activeRenderingEngine.getViewport<StackViewport>(VIEWPORT_ID);
+        await withTimeout(
+          viewport.setStack(series.imageIds, series.currentIndex),
+          "The selected series could not be displayed in time.",
+          () => removeCachedImage(series.imageIds[series.currentIndex]),
+        );
+        viewport.render();
+      }
+
+      if (requestedMode === "stack") {
+        await displayStack(renderingEngine, element);
+        return { mode: "stack" as const, warning: null };
+      }
+
+      const hasVolumeGeometry =
+        series.files.length > 1 &&
+        series.files.every(
+          (file) =>
+            file.imageOrientation &&
+            file.imagePosition &&
+            file.pixelSpacing &&
+            file.rows &&
+            file.columns,
+      );
+      if (!hasVolumeGeometry) {
+        await displayStack(renderingEngine, element);
+        return {
+          mode: "stack" as const,
+          warning:
+            "This series does not contain enough spatial metadata for a 3D reconstruction.",
+        };
+      }
+
+      const volumeId = `cornerstoneStreamingImageVolume:medview-${series.id}`;
+
+      try {
+        renderingEngine.disableElement(VIEWPORT_ID);
+        removeCachedVolume(activeVolumeIdRef.current);
+        activeVolumeIdRef.current = null;
+        renderingEngine.enableElement({
+          viewportId: VIEWPORT_ID,
+          type: Enums.ViewportType.VOLUME_3D,
+          element,
+          defaultOptions: { background: [0, 0, 0] },
+        });
+        bindToolsToViewport();
+
+        const volume = await withTimeout(
+          volumeLoader.createAndCacheVolume(volumeId, {
+            imageIds: series.imageIds,
+          }),
+          "The 3D volume took too long to prepare.",
+          () => removeCachedVolume(volumeId),
+        );
+        await setVolumesForViewports(
+          renderingEngine,
+          [{ volumeId }],
+          [VIEWPORT_ID],
+          true,
+        );
+
+        const viewport =
+          renderingEngine.getViewport<
+            InstanceType<typeof LegacyVolumeViewport3D>
+          >(VIEWPORT_ID);
+        viewport.setProperties({
+          preset:
+            series.modality?.toUpperCase() === "MR"
+              ? "MR-Default"
+              : "CT-Bone",
+        });
+        viewport.resetCamera();
+        viewport.render();
+        volume.load(() => viewport.render());
+        activeVolumeIdRef.current = volumeId;
+        setVolumeToolsActive(true);
+
+        return { mode: "volume" as const, warning: null };
+      } catch (volumeError) {
+        removeCachedVolume(volumeId);
+        await displayStack(renderingEngine, element);
+        return {
+          mode: "stack" as const,
+          warning: `3D rendering is unavailable for this series: ${getErrorMessage(volumeError)}`,
+        };
+      }
+    },
+    [],
+  );
+
   const goToImage = useCallback((nextIndex: number) => {
     const renderingEngine = renderingEngineRef.current;
     const imageIds = imageIdsRef.current;
-    if (!renderingEngine || !imageIds.length) return;
+    if (
+      !renderingEngine ||
+      !imageIds.length ||
+      viewModeRef.current === "volume"
+    ) {
+      return;
+    }
 
     const safeIndex = Math.max(0, Math.min(nextIndex, imageIds.length - 1));
     if (safeIndex === currentIndexRef.current) return;
@@ -795,22 +994,19 @@ function App() {
     setError(null);
 
     try {
-      const viewport = renderingEngine.getViewport<StackViewport>(VIEWPORT_ID);
-      await withTimeout(
-        viewport.setStack(series.imageIds, series.currentIndex),
-        "The selected series could not be displayed in time.",
-        () => removeCachedImage(series.imageIds[series.currentIndex]),
-      );
+      const result = await displaySeries(series, viewModeRef.current);
       if (generation !== loadGenerationRef.current) return;
 
-      viewport.render();
+      viewModeRef.current = result.mode;
       activeSeriesIdRef.current = series.id;
       imageIdsRef.current = series.imageIds;
       currentIndexRef.current = series.currentIndex;
+      setViewMode(result.mode);
       setActiveSeriesId(series.id);
       setCurrentIndex(series.currentIndex);
       setImageCount(series.imageIds.length);
       setSeriesFiles(series.files);
+      setError(result.warning);
     } catch (selectionError) {
       if (generation === loadGenerationRef.current) {
         setError(getErrorMessage(selectionError));
@@ -818,7 +1014,7 @@ function App() {
     } finally {
       if (generation === loadGenerationRef.current) setIsLoading(false);
     }
-  }, []);
+  }, [displaySeries]);
 
   const openFiles = useCallback(async (files: File[]) => {
     if (!files.length) return;
@@ -881,19 +1077,6 @@ function App() {
         return;
       }
 
-      setLoadingMessage("Displaying series…");
-      const viewport = renderingEngine.getViewport<StackViewport>(VIEWPORT_ID);
-      await withTimeout(
-        viewport.setStack(candidateImageIds, initialIndex),
-        "The image was decoded, but the viewer could not display it.",
-        () => releaseImageIds(candidateImageIds),
-      );
-      if (generation !== loadGenerationRef.current) {
-        releaseImageIds(candidateImageIds);
-        return;
-      }
-
-      viewport.render();
       const firstFile = sortedDicomFiles[0];
       const newSeries: DicomSeries = {
         id: `${firstFile.seriesInstanceUid}-${++nextSeriesIdRef.current}`,
@@ -909,17 +1092,32 @@ function App() {
         seriesInstanceUid: firstFile.seriesInstanceUid,
         thumbnailUrl,
       };
+
+      setLoadingMessage(
+        viewModeRef.current === "volume"
+          ? "Building 3D volume…"
+          : "Displaying series…",
+      );
+      const result = await displaySeries(newSeries, viewModeRef.current);
+      if (generation !== loadGenerationRef.current) {
+        releaseImageIds(candidateImageIds);
+        return;
+      }
+
       const nextSeriesList = [...seriesListRef.current, newSeries];
       seriesListRef.current = nextSeriesList;
       imageIdsRef.current = candidateImageIds;
       pendingImageIdsRef.current = [];
       activeSeriesIdRef.current = newSeries.id;
       currentIndexRef.current = initialIndex;
+      viewModeRef.current = result.mode;
       setSeriesList(nextSeriesList);
       setActiveSeriesId(newSeries.id);
+      setViewMode(result.mode);
       setCurrentIndex(initialIndex);
       setImageCount(candidateImageIds.length);
       setSeriesFiles(sortedDicomFiles);
+      setError(result.warning);
     } catch (loadError) {
       if (generation !== loadGenerationRef.current) {
         releaseImageIds(candidateImageIds);
@@ -931,11 +1129,55 @@ function App() {
     } finally {
       if (generation === loadGenerationRef.current) setIsLoading(false);
     }
-  }, []);
+  }, [displaySeries]);
 
   function handleFileSelection(event: ChangeEvent<HTMLInputElement>) {
     void openFiles(Array.from(event.target.files || []));
     event.target.value = "";
+  }
+
+  async function switchViewMode(nextMode: ViewMode) {
+    if (nextMode === viewModeRef.current || isLoading) return;
+
+    const series = seriesListRef.current.find(
+      (item) => item.id === activeSeriesIdRef.current,
+    );
+    if (!series) return;
+
+    const generation = ++loadGenerationRef.current;
+    navigationGenerationRef.current += 1;
+    setIsLoading(true);
+    setLoadingMessage(
+      nextMode === "volume" ? "Building 3D volume…" : "Returning to slices…",
+    );
+    setError(null);
+
+    try {
+      const result = await displaySeries(series, nextMode);
+      if (generation !== loadGenerationRef.current) return;
+
+      viewModeRef.current = result.mode;
+      setViewMode(result.mode);
+      setError(result.warning);
+    } catch (modeError) {
+      if (generation === loadGenerationRef.current) {
+        setError(getErrorMessage(modeError));
+      }
+    } finally {
+      if (generation === loadGenerationRef.current) setIsLoading(false);
+    }
+  }
+
+  function resetVolumeCamera() {
+    const renderingEngine = renderingEngineRef.current;
+    if (!renderingEngine || viewModeRef.current !== "volume") return;
+
+    const viewport =
+      renderingEngine.getViewport<
+        InstanceType<typeof LegacyVolumeViewport3D>
+      >(VIEWPORT_ID);
+    viewport.resetCamera();
+    viewport.render();
   }
 
   function handleDragEnter(event: DragEvent) {
@@ -959,12 +1201,14 @@ function App() {
 
   function handleWheel(event: WheelEvent<HTMLDivElement>) {
     if (!imageCount || event.deltaY === 0) return;
+    if (viewModeRef.current === "volume") return;
+
     event.preventDefault();
     goToImage(currentIndexRef.current + (event.deltaY > 0 ? 1 : -1));
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (!imageCount) return;
+    if (!imageCount || viewModeRef.current === "volume") return;
 
     const destinations: Record<string, number> = {
       ArrowDown: currentIndexRef.current + 1,
@@ -1037,6 +1281,33 @@ function App() {
             >
               <div ref={viewportElementRef} className="absolute inset-0" />
 
+                {imageCount > 0 && (
+                  <div className="absolute right-3 top-3 z-10 flex rounded-md border border-white/10 bg-black/70 p-1 backdrop-blur-sm">
+                    <Button
+                      className="h-8 gap-1.5 px-2.5"
+                      variant={viewMode === "stack" ? "secondary" : "ghost"}
+                      size="sm"
+                      disabled={isLoading}
+                      aria-pressed={viewMode === "stack"}
+                      onClick={() => void switchViewMode("stack")}
+                    >
+                      <Rows3 className="size-3.5" />
+                      2D
+                    </Button>
+                    <Button
+                      className="h-8 gap-1.5 px-2.5"
+                      variant={viewMode === "volume" ? "secondary" : "ghost"}
+                      size="sm"
+                      disabled={isLoading}
+                      aria-pressed={viewMode === "volume"}
+                      onClick={() => void switchViewMode("volume")}
+                    >
+                      <Box className="size-3.5" />
+                      3D
+                    </Button>
+                  </div>
+                )}
+
                 {!imageCount && !isLoading && (
                   <div className="pointer-events-none absolute inset-0 grid place-items-center p-6">
                     <div className="text-center">
@@ -1080,7 +1351,7 @@ function App() {
                   </Card>
                 )}
 
-                {imageCount > 0 && (
+                {imageCount > 0 && viewMode === "stack" && (
                   <DicomMetadataOverlay
                     metadata={seriesFiles[currentIndex]}
                     currentIndex={currentIndex}
@@ -1091,40 +1362,59 @@ function App() {
           </div>
 
           <div className="flex h-16 shrink-0 items-center gap-3 border-t px-3 sm:px-4">
-            <Button
-              variant="outline"
-              size="icon"
-              aria-label="Previous image"
-              disabled={!imageCount || currentIndex === 0}
-              onClick={() => goToImage(currentIndexRef.current - 1)}
-            >
-              <ChevronLeft />
-            </Button>
+            {viewMode === "stack" ? (
+              <>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label="Previous image"
+                  disabled={!imageCount || currentIndex === 0}
+                  onClick={() => goToImage(currentIndexRef.current - 1)}
+                >
+                  <ChevronLeft />
+                </Button>
 
-            <input
-              aria-label="Current image"
-              className="h-2 min-w-0 flex-1 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-40"
-              type="range"
-              min={0}
-              max={Math.max(0, imageCount - 1)}
-              value={currentIndex}
-              disabled={!imageCount}
-              onChange={(event) => goToImage(Number(event.target.value))}
-            />
+                <input
+                  aria-label="Current image"
+                  className="h-2 min-w-0 flex-1 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-40"
+                  type="range"
+                  min={0}
+                  max={Math.max(0, imageCount - 1)}
+                  value={currentIndex}
+                  disabled={!imageCount}
+                  onChange={(event) => goToImage(Number(event.target.value))}
+                />
 
-            <span className="w-20 text-center font-mono text-xs tabular-nums text-muted-foreground">
-              {imageCount ? currentIndex + 1 : 0} / {imageCount}
-            </span>
+                <span className="w-20 text-center font-mono text-xs tabular-nums text-muted-foreground">
+                  {imageCount ? currentIndex + 1 : 0} / {imageCount}
+                </span>
 
-            <Button
-              variant="outline"
-              size="icon"
-              aria-label="Next image"
-              disabled={!imageCount || currentIndex === imageCount - 1}
-              onClick={() => goToImage(currentIndexRef.current + 1)}
-            >
-              <ChevronRight />
-            </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label="Next image"
+                  disabled={!imageCount || currentIndex === imageCount - 1}
+                  onClick={() => goToImage(currentIndexRef.current + 1)}
+                >
+                  <ChevronRight />
+                </Button>
+              </>
+            ) : (
+              <>
+                <p className="min-w-0 flex-1 text-sm text-muted-foreground">
+                  Drag to rotate · Scroll to zoom
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={resetVolumeCamera}
+                >
+                  <RotateCcw className="size-4" />
+                  Reset view
+                </Button>
+              </>
+            )}
           </div>
         </section>
 
