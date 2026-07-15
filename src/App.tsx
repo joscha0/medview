@@ -691,7 +691,10 @@ function setVolumeToolsActive(active: boolean) {
     bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
   });
   toolGroup.setToolActive(ZoomTool.toolName, {
-    bindings: [{ mouseButton: ToolEnums.MouseBindings.Wheel }],
+    bindings: [
+      { mouseButton: ToolEnums.MouseBindings.Wheel },
+      { numTouchPoints: 2 },
+    ],
   });
 }
 
@@ -1720,7 +1723,7 @@ function App() {
             )}
 
             <div
-              className="@container relative min-h-0 min-w-0 overflow-hidden bg-black outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="@container relative min-h-0 min-w-0 touch-none overflow-hidden bg-black outline-none focus-visible:ring-2 focus-visible:ring-ring"
               onWheel={handleWheel}
               onPointerDown={beginVolumeInteraction}
               onPointerUp={scheduleFinalVolumeRender}
@@ -1964,8 +1967,8 @@ function App() {
               <>
                 <p className="min-w-0 flex-1 text-sm text-muted-foreground">
                   {isCropping
-                    ? "Drag crop handles · Scroll to zoom"
-                    : "Drag to rotate · Scroll to zoom"}
+                    ? "Drag crop handles · Pinch or scroll to zoom"
+                    : "Drag to rotate · Pinch or scroll to zoom"}
                 </p>
                 <Button
                   variant="outline"
