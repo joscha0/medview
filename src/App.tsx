@@ -1671,7 +1671,7 @@ function App() {
             )}
 
             <div
-              className="relative min-h-0 min-w-0 overflow-hidden bg-black outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="dicom-viewport relative min-h-0 min-w-0 overflow-hidden bg-black outline-none focus-visible:ring-2 focus-visible:ring-ring"
               onWheel={handleWheel}
               onKeyDown={handleKeyDown}
               tabIndex={0}
@@ -1807,10 +1807,11 @@ function App() {
                       variant="outline"
                       size="xs"
                       className="absolute left-3 top-3 z-10 border-white/15 bg-black/60 text-white/70 backdrop-blur-sm hover:bg-black/80 hover:text-white"
+                      aria-label="Open 3D rendering options"
                       onClick={() => setIsVolumeOptionsOpen(true)}
                     >
                       <SlidersHorizontal />
-                      Options
+                      <span className="viewport-control-label">Options</span>
                     </Button>
                   )}
 
