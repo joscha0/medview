@@ -1676,7 +1676,7 @@ function App() {
               <div ref={viewportElementRef} className="absolute inset-0" />
 
                 {imageCount > 0 && (
-                  <div className="absolute right-3 top-3 z-10 flex rounded-md border border-white/10 bg-black/70 p-1 backdrop-blur-sm">
+                  <div className="absolute right-3 top-3 z-10 flex flex-col rounded-md border border-white/10 bg-black/70 p-1 backdrop-blur-sm md:flex-row">
                     <Button
                       className="h-8 gap-1.5 px-2.5"
                       variant={viewMode === "stack" ? "secondary" : "ghost"}
