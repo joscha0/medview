@@ -37,7 +37,9 @@ import {
   Loader2,
   RotateCcw,
   Rows3,
+  SlidersHorizontal,
   Upload,
+  X,
 } from "lucide-react";
 import {
   type ChangeEvent,
@@ -689,6 +691,7 @@ function App() {
   const [viewMode, setViewMode] = useState<ViewMode>("stack");
   const [volumePreset, setVolumePreset] = useState("CT-Bone");
   const [opacityThreshold, setOpacityThreshold] = useState(0);
+  const [isVolumeOptionsOpen, setIsVolumeOptionsOpen] = useState(true);
   const [isLoadingExamples, setIsLoadingExamples] = useState(false);
   const [anatomyPanelSize, setAnatomyPanelSize] = useState(
     DEFAULT_ANATOMY_PANEL_SIZE,
@@ -1454,10 +1457,24 @@ function App() {
                   </div>
                 )}
 
-                {imageCount > 0 && viewMode === "volume" && (
+                {imageCount > 0 &&
+                  viewMode === "volume" &&
+                  isVolumeOptionsOpen && (
                   <div className="absolute left-3 top-3 z-10 w-[min(22rem,calc(100%-9rem))] rounded-md border border-white/10 bg-black/70 p-2.5 text-white/80 backdrop-blur-sm">
-                    <div className="mb-2 text-xs font-medium text-white/90">
-                      3D rendering
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="text-xs font-medium text-white/90">
+                        3D rendering options
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        className="-mr-1 -mt-1 text-white/55 hover:bg-white/10 hover:text-white"
+                        aria-label="Close 3D rendering options"
+                        onClick={() => setIsVolumeOptionsOpen(false)}
+                      >
+                        <X />
+                      </Button>
                     </div>
                     <label
                       className="mb-1 block text-[11px] text-white/55"
@@ -1505,6 +1522,21 @@ function App() {
                     </div>
                   </div>
                 )}
+
+                {imageCount > 0 &&
+                  viewMode === "volume" &&
+                  !isVolumeOptionsOpen && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      className="absolute left-3 top-3 z-10 border-white/15 bg-black/60 text-white/70 backdrop-blur-sm hover:bg-black/80 hover:text-white"
+                      onClick={() => setIsVolumeOptionsOpen(true)}
+                    >
+                      <SlidersHorizontal />
+                      Options
+                    </Button>
+                  )}
 
                 {!imageCount && !isLoading && (
                   <div className="pointer-events-none absolute inset-0 grid place-items-center p-6">
