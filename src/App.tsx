@@ -146,6 +146,11 @@ function initializeCornerstone() {
           1,
           Math.min(navigator.hardwareConcurrency || 1, 4),
         ),
+        // The naturalized dcmjs provider logs ambiguous implicit-VR `xs`
+        // values as errors before resolving their signedness. Local wadouri
+        // files already use dicom-parser, whose metadata provider resolves
+        // these values from Pixel Representation without noisy fallbacks.
+        useLegacyMetadataProvider: true,
       });
       initCornerstoneTools();
       addTool(TrackballRotateTool);
