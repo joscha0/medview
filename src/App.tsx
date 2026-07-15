@@ -76,8 +76,9 @@ const VIEWPORT_ID = "medview-stack-viewport";
 const TOOL_GROUP_ID = "medview-volume-tools";
 const LOAD_TIMEOUT_MS = 30_000;
 const HEADER_READ_SIZE = 1024 * 1024;
-const EXAMPLE_HEADER_READ_SIZE = 64 * 1024;
+const EXAMPLE_HEADER_READ_SIZE = 8 * 1024;
 const HEADER_READER_COUNT = 4;
+const EXAMPLE_HEADER_READER_COUNT = 12;
 const DEFAULT_ANATOMY_PANEL_SIZE = 35;
 const MIN_VIEWER_PANEL_HEIGHT = 140;
 const INTERACTIVE_SAMPLE_DISTANCE_MULTIPLIER = 6;
@@ -118,6 +119,7 @@ type DicomFileInfo = DicomMetadata & {
 };
 
 type DicomSeries = SeriesPickerItem & {
+  exampleEntry?: ExampleSeriesManifest["series"][number];
   files: DicomFileInfo[];
   imageIds: string[];
   initialVolumeCamera?: Types.ICamera;
@@ -132,6 +134,7 @@ type ExampleSeriesManifest = {
     directory: string;
     files: string[];
     label: string;
+    thumbnail?: string;
   }>;
 };
 
@@ -396,12 +399,57 @@ async function readExampleDicomHeaders(
 
   await Promise.all(
     Array.from(
-      { length: Math.min(HEADER_READER_COUNT, entry.files.length) },
+      {
+        length: Math.min(
+          EXAMPLE_HEADER_READER_COUNT,
+          entry.files.length,
+        ),
+      },
       readNext,
     ),
   );
 
   return results;
+}
+
+async function hydrateExampleSeries(
+  series: DicomSeries,
+  signal: AbortSignal,
+) {
+  const entry = series.exampleEntry;
+  if (!entry || series.files.length) return;
+
+  const exampleFiles = await readExampleDicomHeaders(entry, signal);
+  const seriesInstanceUids = new Set(
+    exampleFiles.map((item) => item.info.seriesInstanceUid),
+  );
+  if (seriesInstanceUids.size !== 1) {
+    throw new Error(`${entry.label} contains more than one DICOM series.`);
+  }
+
+  const urlByFileName = new Map(
+    exampleFiles.map((item) => [item.info.file.name, item.url]),
+  );
+  const sortedDicomFiles = sortDicomFiles(
+    exampleFiles.map((item) => item.info),
+  );
+  const imageIds = sortedDicomFiles.map((item) => {
+    const url = urlByFileName.get(item.file.name);
+    if (!url) throw new Error(`Missing example file ${item.file.name}.`);
+    return `wadouri:${url}`;
+  });
+  const firstFile = sortedDicomFiles[0];
+
+  series.files = sortedDicomFiles;
+  series.imageIds = imageIds;
+  series.currentIndex = Math.floor(imageIds.length / 2);
+  series.imageCount = imageIds.length;
+  series.label =
+    firstFile.seriesDescription ||
+    firstFile.studyDescription ||
+    entry.label;
+  series.modality = firstFile.modality;
+  series.seriesInstanceUid = firstFile.seriesInstanceUid;
 }
 
 function getSliceNormal(
@@ -754,6 +802,7 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const renderingEngineRef = useRef<RenderingEngine | null>(null);
   const activeVolumeIdRef = useRef<string | null>(null);
+  const exampleHydrationAbortRef = useRef<AbortController | null>(null);
   const currentIndexRef = useRef(0);
   const imageIdsRef = useRef<string[]>([]);
   const viewModeRef = useRef<ViewMode>("stack");
@@ -908,6 +957,7 @@ function App() {
       cancelled = true;
       loadGenerationRef.current += 1;
       navigationGenerationRef.current += 1;
+      exampleHydrationAbortRef.current?.abort();
       resizeObserver?.disconnect();
       removeMobileGestureGuards?.();
       if (renderQualityRestoreTimerRef.current !== null) {
@@ -932,73 +982,7 @@ function App() {
     if (!isReady) return;
 
     const abortController = new AbortController();
-    const pendingExampleImageIds = new Set<string>();
     let cancelled = false;
-
-    async function loadExampleSeries(
-      entry: ExampleSeriesManifest["series"][number],
-    ): Promise<DicomSeries> {
-      let imageIds: string[] = [];
-
-      try {
-        const exampleFiles = await readExampleDicomHeaders(
-          entry,
-          abortController.signal,
-        );
-        const seriesInstanceUids = new Set(
-          exampleFiles.map((item) => item.info.seriesInstanceUid),
-        );
-        if (seriesInstanceUids.size !== 1) {
-          throw new Error(
-            `${entry.label} contains more than one DICOM series.`,
-          );
-        }
-
-        const urlByFileName = new Map(
-          exampleFiles.map((item) => [item.info.file.name, item.url]),
-        );
-        const sortedDicomFiles = sortDicomFiles(
-          exampleFiles.map((item) => item.info),
-        );
-        imageIds = sortedDicomFiles.map((item) => {
-          const url = urlByFileName.get(item.file.name);
-          if (!url) throw new Error(`Missing example file ${item.file.name}.`);
-          return `wadouri:${url}`;
-        });
-        imageIds.forEach((imageId) => pendingExampleImageIds.add(imageId));
-
-        const initialIndex = Math.floor(imageIds.length / 2);
-        const middleImage = await withTimeout(
-          imageLoader.loadAndCacheImage(imageIds[initialIndex]),
-          `${entry.label} took too long to decode.`,
-          () => releaseImageIds(imageIds),
-        );
-        const thumbnailUrl = await createSeriesThumbnail(
-          middleImage,
-          sortedDicomFiles[initialIndex]?.modality,
-        );
-        const firstFile = sortedDicomFiles[0];
-
-        return {
-          id: `example-${firstFile.seriesInstanceUid}`,
-          files: sortedDicomFiles,
-          imageIds,
-          currentIndex: initialIndex,
-          imageCount: imageIds.length,
-          isExample: true,
-          label:
-            firstFile.seriesDescription ||
-            firstFile.studyDescription ||
-            entry.label,
-          modality: firstFile.modality,
-          seriesInstanceUid: firstFile.seriesInstanceUid,
-          thumbnailUrl,
-        };
-      } catch (exampleError) {
-        releaseImageIds(imageIds);
-        throw exampleError;
-      }
-    }
 
     async function loadExamples() {
       setIsLoadingExamples(true);
@@ -1015,17 +999,26 @@ function App() {
           throw new Error("Example manifest could not be loaded.");
 
         const manifest = (await response.json()) as ExampleSeriesManifest;
-        const results = await Promise.allSettled(
-          manifest.series.map(loadExampleSeries),
-        );
-        const examples = results.flatMap((result) =>
-          result.status === "fulfilled" ? [result.value] : [],
-        );
+        const examples: DicomSeries[] = manifest.series.map((entry) => ({
+          id: `example-${entry.directory}`,
+          exampleEntry: entry,
+          files: [],
+          imageIds: [],
+          currentIndex: Math.floor(entry.files.length / 2),
+          imageCount: entry.files.length,
+          isExample: true,
+          label: entry.label,
+          modality: entry.directory.split("_", 1)[0],
+          seriesInstanceUid: entry.directory,
+          thumbnailUrl: entry.thumbnail
+            ? new URL(
+                `${import.meta.env.BASE_URL}example-series/${entry.thumbnail}`,
+                document.baseURI,
+              ).href
+            : undefined,
+        }));
 
-        if (cancelled) {
-          examples.forEach((series) => releaseImageIds(series.imageIds));
-          return;
-        }
+        if (cancelled) return;
         if (!examples.length) {
           throw new Error("The bundled example series could not be loaded.");
         }
@@ -1037,11 +1030,6 @@ function App() {
             (series) => !exampleIds.has(series.id),
           ),
         ];
-        examples.forEach((series) =>
-          series.imageIds.forEach((imageId) =>
-            pendingExampleImageIds.delete(imageId),
-          ),
-        );
         seriesListRef.current = nextSeriesList;
         setSeriesList(nextSeriesList);
       } catch (exampleError) {
@@ -1058,8 +1046,6 @@ function App() {
     return () => {
       cancelled = true;
       abortController.abort();
-      releaseImageIds([...pendingExampleImageIds]);
-      pendingExampleImageIds.clear();
     };
   }, [isReady]);
 
@@ -1237,6 +1223,8 @@ function App() {
       const renderingEngine = renderingEngineRef.current;
       if (!series || !renderingEngine) return;
 
+      exampleHydrationAbortRef.current?.abort();
+      exampleHydrationAbortRef.current = null;
       const generation = ++loadGenerationRef.current;
       navigationGenerationRef.current += 1;
       releaseImageIds(pendingImageIdsRef.current);
@@ -1246,6 +1234,20 @@ function App() {
       setError(null);
 
       try {
+        if (series.exampleEntry && !series.files.length) {
+          const abortController = new AbortController();
+          exampleHydrationAbortRef.current = abortController;
+          setLoadingMessage("Reading example metadata…");
+          await hydrateExampleSeries(series, abortController.signal);
+          if (generation !== loadGenerationRef.current) return;
+          setSeriesList([...seriesListRef.current]);
+        }
+
+        setLoadingMessage(
+          viewModeRef.current === "volume"
+            ? "Building 3D volume…"
+            : "Displaying series…",
+        );
         const result = await displaySeries(series, viewModeRef.current);
         if (generation !== loadGenerationRef.current) return;
 
@@ -1263,11 +1265,32 @@ function App() {
         setImageCount(series.imageIds.length);
         setSeriesFiles(series.files);
         setError(result.warning);
+
+        if (series.isExample && !series.thumbnailUrl) {
+          void imageLoader
+            .loadAndCacheImage(series.imageIds[series.currentIndex])
+            .then((image) =>
+              createSeriesThumbnail(
+                image,
+                series.files[series.currentIndex]?.modality,
+              ),
+            )
+            .then((thumbnailUrl) => {
+              series.thumbnailUrl = thumbnailUrl;
+              setSeriesList([...seriesListRef.current]);
+            })
+            .catch(() => {
+              // A thumbnail is optional; the selected series is already open.
+            });
+        }
       } catch (selectionError) {
         if (generation === loadGenerationRef.current) {
           setError(getErrorMessage(selectionError));
         }
       } finally {
+        if (generation === loadGenerationRef.current) {
+          exampleHydrationAbortRef.current = null;
+        }
         if (generation === loadGenerationRef.current) setIsLoading(false);
       }
     },
