@@ -32,10 +32,12 @@ export function AnatomyLayerPicker({
         type="button"
         variant="outline"
         size="xs"
-        className="absolute left-2 top-2 z-10 border-white/15 bg-black/60 text-white/70 backdrop-blur-sm hover:bg-black/80 hover:text-white"
+        className="absolute left-3 top-3 z-10 h-10 gap-1.5 border-white/10 bg-black/70 px-3 text-sm text-white/70 backdrop-blur-sm hover:bg-black/80 hover:text-white"
+        aria-label="Open anatomy layers"
+        title="Anatomy layers"
         onClick={() => setIsOpen(true)}
       >
-        <Layers />
+        <Layers className="size-4" />
         Layers
       </Button>
     );

@@ -88,12 +88,13 @@ export function DicomMetadataOverlay({
         type="button"
         variant="outline"
         size="xs"
-        className="absolute left-3 top-3 z-10 border-white/15 bg-black/60 text-white/70 backdrop-blur-sm hover:bg-black/80 hover:text-white"
+        className="absolute left-3 top-3 z-10 h-10 gap-1.5 border-white/10 bg-black/70 px-3 text-sm text-white/70 backdrop-blur-sm hover:bg-black/80 hover:text-white @max-[18rem]:size-10 @max-[18rem]:gap-0 @max-[18rem]:px-0"
         aria-label="Open DICOM metadata"
+        title="DICOM metadata"
         onClick={() => setIsOpen(true)}
       >
-        <Info />
-        <span className="viewport-control-label">Metadata</span>
+        <Info className="size-4" />
+        <span className="@max-[18rem]:hidden">Metadata</span>
       </Button>
     );
   }

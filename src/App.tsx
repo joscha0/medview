@@ -1671,7 +1671,7 @@ function App() {
             )}
 
             <div
-              className="dicom-viewport relative min-h-0 min-w-0 overflow-hidden bg-black outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="@container relative min-h-0 min-w-0 overflow-hidden bg-black outline-none focus-visible:ring-2 focus-visible:ring-ring"
               onWheel={handleWheel}
               onKeyDown={handleKeyDown}
               tabIndex={0}
@@ -1806,12 +1806,13 @@ function App() {
                       type="button"
                       variant="outline"
                       size="xs"
-                      className="absolute left-3 top-3 z-10 border-white/15 bg-black/60 text-white/70 backdrop-blur-sm hover:bg-black/80 hover:text-white"
+                      className="absolute left-3 top-3 z-10 h-10 gap-1.5 border-white/10 bg-black/70 px-3 text-sm text-white/70 backdrop-blur-sm hover:bg-black/80 hover:text-white @max-[18rem]:size-10 @max-[18rem]:gap-0 @max-[18rem]:px-0"
                       aria-label="Open 3D rendering options"
+                      title="3D rendering options"
                       onClick={() => setIsVolumeOptionsOpen(true)}
                     >
-                      <SlidersHorizontal />
-                      <span className="viewport-control-label">Options</span>
+                      <SlidersHorizontal className="size-4" />
+                      <span className="@max-[18rem]:hidden">Options</span>
                     </Button>
                   )}
 
