@@ -1553,11 +1553,20 @@ function App() {
           recenterCamera(viewport, cropCenter);
           viewport.render();
         }
+        toolGroup.setToolDisabled(VolumeCroppingTool.toolName);
+        toolGroup.setToolActive(OrbitRotateTool.toolName, {
+          bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
+        });
         setIsCropping(false);
         return;
       }
 
       if (hasCrop) {
+        toolGroup.setToolDisabled(OrbitRotateTool.toolName);
+        toolGroup.setToolActive(VolumeCroppingTool.toolName, {
+          bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
+        });
+        croppingTool.setClippingPlanesVisible(true);
         croppingTool.setHandlesVisible(true);
         setIsCropping(true);
         return;
