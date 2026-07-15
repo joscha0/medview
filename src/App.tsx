@@ -115,6 +115,7 @@ type DicomFileInfo = DicomMetadata & {
 type DicomSeries = SeriesPickerItem & {
   files: DicomFileInfo[];
   imageIds: string[];
+  initialVolumeCamera?: Types.ICamera;
   currentIndex: number;
   opacityThreshold?: number;
   seriesInstanceUid: string;
@@ -577,6 +578,20 @@ function getDefaultVolumePreset(modality?: string) {
   return modality?.toUpperCase() === "MR" ? "MR-Default" : "CT-Bone";
 }
 
+function cloneCamera(camera: Types.ICamera): Types.ICamera {
+  return {
+    ...camera,
+    aspectRatio: camera.aspectRatio ? [...camera.aspectRatio] : undefined,
+    clippingRange: camera.clippingRange ? [...camera.clippingRange] : undefined,
+    focalPoint: camera.focalPoint ? [...camera.focalPoint] : undefined,
+    position: camera.position ? [...camera.position] : undefined,
+    viewPlaneNormal: camera.viewPlaneNormal
+      ? [...camera.viewPlaneNormal]
+      : undefined,
+    viewUp: camera.viewUp ? [...camera.viewUp] : undefined,
+  };
+}
+
 function applyVolumePresentation(
   viewport: InstanceType<typeof LegacyVolumeViewport3D>,
   preset: string,
@@ -990,6 +1005,7 @@ function App() {
         series.opacityThreshold = threshold;
         applyVolumePresentation(viewport, preset, threshold);
         viewport.resetCamera();
+        series.initialVolumeCamera = cloneCamera(viewport.getCamera());
         viewport.render();
         volume.load(() => viewport.render());
         activeVolumeIdRef.current = volumeId;
@@ -1255,14 +1271,40 @@ function App() {
 
   function resetVolumeCamera() {
     const renderingEngine = renderingEngineRef.current;
-    if (!renderingEngine || viewModeRef.current !== "volume") return;
+    const series = seriesListRef.current.find(
+      (item) => item.id === activeSeriesIdRef.current,
+    );
+    if (
+      !renderingEngine ||
+      !series ||
+      viewModeRef.current !== "volume"
+    ) {
+      return;
+    }
 
-    const viewport =
-      renderingEngine.getViewport<
-        InstanceType<typeof LegacyVolumeViewport3D>
-      >(VIEWPORT_ID);
-    viewport.resetCamera();
-    viewport.render();
+    try {
+      const viewport =
+        renderingEngine.getViewport<
+          InstanceType<typeof LegacyVolumeViewport3D>
+        >(VIEWPORT_ID);
+      const defaultPreset = getDefaultVolumePreset(series.modality);
+
+      applyVolumePresentation(viewport, defaultPreset, 0);
+      if (series.initialVolumeCamera) {
+        viewport.setCamera(cloneCamera(series.initialVolumeCamera));
+      } else {
+        viewport.resetCamera();
+      }
+      viewport.render();
+
+      series.volumePreset = defaultPreset;
+      series.opacityThreshold = 0;
+      setVolumePreset(defaultPreset);
+      setOpacityThreshold(0);
+      setError(null);
+    } catch (resetError) {
+      setError(`Could not reset the 3D view: ${getErrorMessage(resetError)}`);
+    }
   }
 
   function changeVolumePreset(nextPreset: string) {
