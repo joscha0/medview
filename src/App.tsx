@@ -20,7 +20,6 @@ import {
   Enums as ToolEnums,
   init as initCornerstoneTools,
   ToolGroupManager,
-  TrackballRotateTool,
   VolumeCroppingTool,
   ZoomTool,
 } from "@cornerstonejs/tools";
@@ -70,6 +69,7 @@ import {
   SeriesPicker,
   type SeriesPickerItem,
 } from "@/components/series-picker";
+import { OrbitRotateTool } from "@/tools/orbit-rotate-tool";
 
 const RENDERING_ENGINE_ID = "medview-rendering-engine";
 const VIEWPORT_ID = "medview-stack-viewport";
@@ -156,7 +156,7 @@ function initializeCornerstone() {
         useLegacyMetadataProvider: true,
       });
       initCornerstoneTools();
-      addTool(TrackballRotateTool);
+      addTool(OrbitRotateTool);
       addTool(VolumeCroppingTool);
       addTool(ZoomTool);
     });
@@ -603,6 +603,33 @@ function cloneCamera(camera: Types.ICamera): Types.ICamera {
   };
 }
 
+function alignVolumeCameraForOrbit(
+  viewport: InstanceType<typeof LegacyVolumeViewport3D>,
+) {
+  const camera = viewport.getCamera();
+  if (!camera.focalPoint || !camera.position) return;
+
+  const distance = Math.hypot(
+    camera.position[0] - camera.focalPoint[0],
+    camera.position[1] - camera.focalPoint[1],
+    camera.position[2] - camera.focalPoint[2],
+  );
+  if (distance === 0) return;
+
+  // DICOM patient coordinates are Z-up. Start from the anterior side so the
+  // camera is perpendicular to the orbit pole and horizontal drag has a clear
+  // direction immediately.
+  viewport.setCamera({
+    focalPoint: [...camera.focalPoint],
+    position: [
+      camera.focalPoint[0],
+      camera.focalPoint[1] - distance,
+      camera.focalPoint[2],
+    ],
+    viewUp: [0, 0, 1],
+  });
+}
+
 function recenterCamera(
   viewport: InstanceType<typeof LegacyVolumeViewport3D>,
   nextFocalPoint: Types.Point3,
@@ -680,14 +707,14 @@ function setVolumeToolsActive(active: boolean) {
   if (!toolGroup) return;
 
   if (!active) {
-    toolGroup.setToolDisabled(TrackballRotateTool.toolName);
+    toolGroup.setToolDisabled(OrbitRotateTool.toolName);
     toolGroup.setToolDisabled(VolumeCroppingTool.toolName);
     toolGroup.setToolDisabled(ZoomTool.toolName);
     return;
   }
 
   toolGroup.setToolDisabled(VolumeCroppingTool.toolName);
-  toolGroup.setToolActive(TrackballRotateTool.toolName, {
+  toolGroup.setToolActive(OrbitRotateTool.toolName, {
     bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
   });
   toolGroup.setToolActive(ZoomTool.toolName, {
@@ -800,7 +827,7 @@ function App() {
         renderingEngineRef.current = renderingEngine;
 
         const toolGroup = ToolGroupManager.createToolGroup(TOOL_GROUP_ID);
-        toolGroup?.addTool(TrackballRotateTool.toolName);
+        toolGroup?.addTool(OrbitRotateTool.toolName);
         toolGroup?.addTool(VolumeCroppingTool.toolName, {
           initialCropFactor: 0.001,
           showClippingPlanes: false,
@@ -1124,6 +1151,7 @@ function App() {
         series.opacityThreshold = threshold;
         applyVolumePresentation(viewport, preset, threshold);
         viewport.resetCamera();
+        alignVolumeCameraForOrbit(viewport);
         series.initialVolumeCamera = cloneCamera(viewport.getCamera());
         viewport.render();
         volume.load(() => viewport.render());
@@ -1535,7 +1563,7 @@ function App() {
         return;
       }
 
-      toolGroup.setToolDisabled(TrackballRotateTool.toolName);
+      toolGroup.setToolDisabled(OrbitRotateTool.toolName);
       toolGroup.setToolActive(VolumeCroppingTool.toolName, {
         bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
       });
@@ -1617,7 +1645,7 @@ function App() {
       }
 
       toolGroup.setToolDisabled(VolumeCroppingTool.toolName);
-      toolGroup.setToolActive(TrackballRotateTool.toolName, {
+      toolGroup.setToolActive(OrbitRotateTool.toolName, {
         bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
       });
       viewport.render();
