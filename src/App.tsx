@@ -6,6 +6,7 @@ import {
   RenderingEngine,
   setVolumesForViewports,
   StackViewport,
+  type Types,
   utilities,
   volumeLoader,
   init as initCornerstoneCore,
@@ -113,6 +114,7 @@ type DicomSeries = SeriesPickerItem & {
   files: DicomFileInfo[];
   imageIds: string[];
   currentIndex: number;
+  opacityThreshold?: number;
   seriesInstanceUid: string;
   volumePreset?: string;
 };
@@ -573,6 +575,43 @@ function getDefaultVolumePreset(modality?: string) {
   return modality?.toUpperCase() === "MR" ? "MR-Default" : "CT-Bone";
 }
 
+function applyVolumePresentation(
+  viewport: InstanceType<typeof LegacyVolumeViewport3D>,
+  preset: string,
+  opacityThreshold: number,
+) {
+  viewport.setProperties({ preset });
+  if (opacityThreshold <= 0) return;
+
+  const volumeActor = viewport.getDefaultActor().actor as Types.VolumeActor;
+  const opacityFunction = volumeActor.getProperty().getScalarOpacity(0);
+  const nodes = Array.from({ length: opacityFunction.getSize() }, (_, index) => {
+    const node = [0, 0, 0.5, 0];
+    opacityFunction.getNodeValue(index, node);
+    return node;
+  });
+  if (!nodes.length) return;
+
+  const minimum = nodes[0][0];
+  const maximum = nodes[nodes.length - 1][0];
+  const threshold =
+    minimum + (maximum - minimum) * (opacityThreshold / 100);
+
+  opacityFunction.removeAllPoints();
+  opacityFunction.addPoint(minimum, 0);
+  opacityFunction.addPoint(threshold, 0);
+  nodes
+    .filter(([intensity]) => intensity > threshold)
+    .forEach(([intensity, opacity, midpoint, sharpness]) => {
+      opacityFunction.addPointLong(
+        intensity,
+        opacity,
+        midpoint,
+        sharpness,
+      );
+    });
+}
+
 function removeCachedVolume(volumeId: string | null) {
   if (!volumeId) return;
   const volume = cache.getVolume(volumeId);
@@ -649,6 +688,7 @@ function App() {
   const [activeSeriesId, setActiveSeriesId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("stack");
   const [volumePreset, setVolumePreset] = useState("CT-Bone");
+  const [opacityThreshold, setOpacityThreshold] = useState(0);
   const [isLoadingExamples, setIsLoadingExamples] = useState(false);
   const [anatomyPanelSize, setAnatomyPanelSize] = useState(
     DEFAULT_ANATOMY_PANEL_SIZE,
@@ -942,17 +982,22 @@ function App() {
           >(VIEWPORT_ID);
         const preset =
           series.volumePreset ?? getDefaultVolumePreset(series.modality);
+        const threshold = series.opacityThreshold ?? 0;
         series.volumePreset = preset;
-        viewport.setProperties({
-          preset,
-        });
+        series.opacityThreshold = threshold;
+        applyVolumePresentation(viewport, preset, threshold);
         viewport.resetCamera();
         viewport.render();
         volume.load(() => viewport.render());
         activeVolumeIdRef.current = volumeId;
         setVolumeToolsActive(true);
 
-        return { mode: "volume" as const, preset, warning: null };
+        return {
+          mode: "volume" as const,
+          opacityThreshold: threshold,
+          preset,
+          warning: null,
+        };
       } catch (volumeError) {
         removeCachedVolume(volumeId);
         await displayStack(renderingEngine, element);
@@ -1027,7 +1072,10 @@ function App() {
       imageIdsRef.current = series.imageIds;
       currentIndexRef.current = series.currentIndex;
       setViewMode(result.mode);
-      if (result.mode === "volume") setVolumePreset(result.preset);
+      if (result.mode === "volume") {
+        setVolumePreset(result.preset);
+        setOpacityThreshold(result.opacityThreshold);
+      }
       setActiveSeriesId(series.id);
       setCurrentIndex(series.currentIndex);
       setImageCount(series.imageIds.length);
@@ -1140,7 +1188,10 @@ function App() {
       setSeriesList(nextSeriesList);
       setActiveSeriesId(newSeries.id);
       setViewMode(result.mode);
-      if (result.mode === "volume") setVolumePreset(result.preset);
+      if (result.mode === "volume") {
+        setVolumePreset(result.preset);
+        setOpacityThreshold(result.opacityThreshold);
+      }
       setCurrentIndex(initialIndex);
       setImageCount(candidateImageIds.length);
       setSeriesFiles(sortedDicomFiles);
@@ -1185,7 +1236,10 @@ function App() {
 
       viewModeRef.current = result.mode;
       setViewMode(result.mode);
-      if (result.mode === "volume") setVolumePreset(result.preset);
+      if (result.mode === "volume") {
+        setVolumePreset(result.preset);
+        setOpacityThreshold(result.opacityThreshold);
+      }
       setError(result.warning);
     } catch (modeError) {
       if (generation === loadGenerationRef.current) {
@@ -1226,13 +1280,49 @@ function App() {
         renderingEngine.getViewport<
           InstanceType<typeof LegacyVolumeViewport3D>
         >(VIEWPORT_ID);
-      viewport.setProperties({ preset: nextPreset });
+      applyVolumePresentation(
+        viewport,
+        nextPreset,
+        series.opacityThreshold ?? 0,
+      );
       viewport.render();
       series.volumePreset = nextPreset;
       setVolumePreset(nextPreset);
       setError(null);
     } catch (presetError) {
       setError(`Could not apply this preset: ${getErrorMessage(presetError)}`);
+    }
+  }
+
+  function changeOpacityThreshold(nextThreshold: number) {
+    const renderingEngine = renderingEngineRef.current;
+    const series = seriesListRef.current.find(
+      (item) => item.id === activeSeriesIdRef.current,
+    );
+    if (
+      !renderingEngine ||
+      !series ||
+      viewModeRef.current !== "volume"
+    ) {
+      return;
+    }
+
+    try {
+      const viewport =
+        renderingEngine.getViewport<
+          InstanceType<typeof LegacyVolumeViewport3D>
+        >(VIEWPORT_ID);
+      const preset =
+        series.volumePreset ?? getDefaultVolumePreset(series.modality);
+      applyVolumePresentation(viewport, preset, nextThreshold);
+      viewport.render();
+      series.opacityThreshold = nextThreshold;
+      setOpacityThreshold(nextThreshold);
+      setError(null);
+    } catch (thresholdError) {
+      setError(
+        `Could not apply the opacity threshold: ${getErrorMessage(thresholdError)}`,
+      );
     }
   }
 
@@ -1364,6 +1454,58 @@ function App() {
                   </div>
                 )}
 
+                {imageCount > 0 && viewMode === "volume" && (
+                  <div className="absolute left-3 top-3 z-10 w-[min(22rem,calc(100%-9rem))] rounded-md border border-white/10 bg-black/70 p-2.5 text-white/80 backdrop-blur-sm">
+                    <div className="mb-2 text-xs font-medium text-white/90">
+                      3D rendering
+                    </div>
+                    <label
+                      className="mb-1 block text-[11px] text-white/55"
+                      htmlFor="volume-preset"
+                    >
+                      Preset
+                    </label>
+                    <select
+                      id="volume-preset"
+                      className="h-8 w-full rounded border border-white/15 bg-black/60 px-2 text-xs text-white outline-none focus-visible:border-white/35 focus-visible:ring-2 focus-visible:ring-white/20"
+                      value={volumePreset}
+                      onChange={(event) =>
+                        changeVolumePreset(event.target.value)
+                      }
+                    >
+                      {volumePresetOptions.map((preset) => (
+                        <option key={preset.value} value={preset.value}>
+                          {preset.label}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="mt-2.5 flex items-center gap-2">
+                      <label
+                        className="shrink-0 text-[11px] text-white/55"
+                        htmlFor="opacity-threshold"
+                      >
+                        Threshold
+                      </label>
+                      <input
+                        id="opacity-threshold"
+                        aria-valuetext={`${opacityThreshold}% intensity cutoff`}
+                        className="h-2 min-w-16 flex-1 cursor-pointer accent-primary"
+                        type="range"
+                        min={0}
+                        max={95}
+                        step={1}
+                        value={opacityThreshold}
+                        onChange={(event) =>
+                          changeOpacityThreshold(Number(event.target.value))
+                        }
+                      />
+                      <span className="w-9 shrink-0 text-right font-mono text-[11px] tabular-nums text-white/60">
+                        {opacityThreshold}%
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 {!imageCount && !isLoading && (
                   <div className="pointer-events-none absolute inset-0 grid place-items-center p-6">
                     <div className="text-center">
@@ -1460,21 +1602,6 @@ function App() {
                 <p className="min-w-0 flex-1 text-sm text-muted-foreground">
                   Drag to rotate · Scroll to zoom
                 </p>
-                <label className="sr-only" htmlFor="volume-preset">
-                  3D rendering preset
-                </label>
-                <select
-                  id="volume-preset"
-                  className="h-9 min-w-32 rounded-md border border-input bg-background px-2.5 text-sm text-foreground shadow-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
-                  value={volumePreset}
-                  onChange={(event) => changeVolumePreset(event.target.value)}
-                >
-                  {volumePresetOptions.map((preset) => (
-                    <option key={preset.value} value={preset.value}>
-                      {preset.label}
-                    </option>
-                  ))}
-                </select>
                 <Button
                   variant="outline"
                   size="sm"
