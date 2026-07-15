@@ -84,7 +84,7 @@ export function DicomMetadataOverlay({
         type="button"
         variant="outline"
         size="xs"
-        className="absolute right-3 top-3 z-10 border-white/15 bg-black/60 text-white/70 backdrop-blur-sm hover:bg-black/80 hover:text-white"
+        className="absolute left-3 top-3 z-10 border-white/15 bg-black/60 text-white/70 backdrop-blur-sm hover:bg-black/80 hover:text-white"
         onClick={() => setIsOpen(true)}
       >
         <Info />
@@ -94,9 +94,9 @@ export function DicomMetadataOverlay({
   }
 
   return (
-    <div className="pointer-events-none absolute inset-x-3 top-3 flex items-start justify-between gap-4 font-mono text-[11px] leading-4 text-white/70">
-      {hasStudyContext ? (
-        <div className="metadata-selectable pointer-events-auto max-w-[min(28rem,55%)] rounded bg-black/60 px-2 py-1.5 backdrop-blur-sm">
+    <div className="metadata-selectable pointer-events-auto absolute left-3 top-3 max-w-[min(28rem,calc(100%-9rem))] rounded bg-black/60 px-2 py-1.5 font-mono text-[11px] leading-4 text-white/70 backdrop-blur-sm">
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
           {(patientName || patientDetails) && (
             <>
               {patientName && (
@@ -114,26 +114,24 @@ export function DicomMetadataOverlay({
           )}
           {scanDetails && <div>{scanDetails}</div>}
         </div>
-      ) : (
-        <div />
-      )}
-
-      <div className="metadata-selectable pointer-events-auto shrink-0 rounded bg-black/60 px-2 py-1.5 text-right tabular-nums backdrop-blur-sm">
-        <div className="flex items-start justify-end gap-1.5">
-          <div className="text-white/90">
-            {currentIndex + 1} / {imageCount}
-          </div>
+        <div className="flex shrink-0 items-start gap-1.5 tabular-nums">
+          <div className="text-white/90">{currentIndex + 1} / {imageCount}</div>
           <Button
             type="button"
             variant="ghost"
             size="icon-xs"
-            className="pointer-events-auto -mr-1 -mt-0.5 text-white/55 hover:bg-white/10 hover:text-white"
+            className="-mr-1 -mt-0.5 text-white/55 hover:bg-white/10 hover:text-white"
             aria-label="Close DICOM metadata"
             onClick={() => setIsOpen(false)}
           >
             <X />
           </Button>
         </div>
+      </div>
+
+      <div
+        className={hasStudyContext ? "mt-1 border-t border-white/10 pt-1" : ""}
+      >
         {metadata?.columns && metadata.rows && (
           <div>
             {metadata.columns} × {metadata.rows} px
