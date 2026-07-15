@@ -80,6 +80,9 @@ const EXAMPLE_HEADER_READ_SIZE = 64 * 1024;
 const HEADER_READER_COUNT = 4;
 const DEFAULT_ANATOMY_PANEL_SIZE = 35;
 const MIN_VIEWER_PANEL_HEIGHT = 140;
+const INTERACTIVE_SAMPLE_DISTANCE_MULTIPLIER = 2.5;
+const FINAL_SAMPLE_DISTANCE_MULTIPLIER = 1;
+const RENDER_QUALITY_RESTORE_DELAY_MS = 140;
 const fileNameCollator = new Intl.Collator(undefined, {
   numeric: true,
   sensitivity: "base",
@@ -739,6 +742,7 @@ function App() {
   const seriesListRef = useRef<DicomSeries[]>([]);
   const activeSeriesIdRef = useRef<string | null>(null);
   const nextSeriesIdRef = useRef(0);
+  const renderQualityRestoreTimerRef = useRef<number | null>(null);
 
   const [isReady, setIsReady] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -819,6 +823,9 @@ function App() {
       loadGenerationRef.current += 1;
       navigationGenerationRef.current += 1;
       resizeObserver?.disconnect();
+      if (renderQualityRestoreTimerRef.current !== null) {
+        window.clearTimeout(renderQualityRestoreTimerRef.current);
+      }
       ToolGroupManager.destroyToolGroup(TOOL_GROUP_ID);
       renderingEngineRef.current?.destroy();
       renderingEngineRef.current = null;
@@ -1595,10 +1602,47 @@ function App() {
 
   function handleWheel(event: WheelEvent<HTMLDivElement>) {
     if (!imageCount || event.deltaY === 0) return;
-    if (viewModeRef.current === "volume") return;
+    if (viewModeRef.current === "volume") {
+      beginVolumeInteraction();
+      scheduleFinalVolumeRender();
+      return;
+    }
 
     event.preventDefault();
     goToImage(currentIndexRef.current + (event.deltaY > 0 ? 1 : -1));
+  }
+
+  function setVolumeSampleDistance(multiplier: number) {
+    const renderingEngine = renderingEngineRef.current;
+    if (!renderingEngine || viewModeRef.current !== "volume") return;
+
+    try {
+      const viewport =
+        renderingEngine.getViewport<
+          InstanceType<typeof LegacyVolumeViewport3D>
+        >(VIEWPORT_ID);
+      viewport.setSampleDistanceMultiplier(multiplier);
+    } catch {
+      // The viewport may be changing between stack and volume modes.
+    }
+  }
+
+  function beginVolumeInteraction() {
+    if (renderQualityRestoreTimerRef.current !== null) {
+      window.clearTimeout(renderQualityRestoreTimerRef.current);
+      renderQualityRestoreTimerRef.current = null;
+    }
+    setVolumeSampleDistance(INTERACTIVE_SAMPLE_DISTANCE_MULTIPLIER);
+  }
+
+  function scheduleFinalVolumeRender() {
+    if (renderQualityRestoreTimerRef.current !== null) {
+      window.clearTimeout(renderQualityRestoreTimerRef.current);
+    }
+    renderQualityRestoreTimerRef.current = window.setTimeout(() => {
+      renderQualityRestoreTimerRef.current = null;
+      setVolumeSampleDistance(FINAL_SAMPLE_DISTANCE_MULTIPLIER);
+    }, RENDER_QUALITY_RESTORE_DELAY_MS);
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -1678,6 +1722,10 @@ function App() {
             <div
               className="@container relative min-h-0 min-w-0 overflow-hidden bg-black outline-none focus-visible:ring-2 focus-visible:ring-ring"
               onWheel={handleWheel}
+              onPointerDown={beginVolumeInteraction}
+              onPointerUp={scheduleFinalVolumeRender}
+              onPointerCancel={scheduleFinalVolumeRender}
+              onLostPointerCapture={scheduleFinalVolumeRender}
               onKeyDown={handleKeyDown}
               tabIndex={0}
               aria-label="DICOM image viewport. Use the mouse wheel or arrow keys to move through the series."
