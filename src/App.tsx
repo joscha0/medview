@@ -122,7 +122,11 @@ function App() {
               onLostPointerCapture={scheduleFinalVolumeRender}
               onKeyDown={handleKeyDown}
               tabIndex={0}
-              aria-label="DICOM image viewport. Use the mouse wheel or arrow keys to move through the series."
+              aria-label={
+                viewMode === "volume"
+                  ? "3D DICOM volume viewport. Drag to rotate and scroll to zoom."
+                  : "DICOM image viewport. Use the mouse wheel or arrow keys to move through the series."
+              }
             >
               <div ref={viewportElementRef} className="absolute inset-0" />
 
