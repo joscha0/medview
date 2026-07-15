@@ -839,6 +839,24 @@ function App() {
 
         resizeObserver = new ResizeObserver(() => {
           renderingEngine.resize(true, true);
+          if (viewModeRef.current !== "volume") return;
+
+          const croppingTool = getVolumeCroppingTool();
+          if (
+            !croppingTool?.getClippingPlanesVisible() ||
+            croppingTool.originalClippingPlanes.length < 6
+          ) {
+            return;
+          }
+
+          const viewport = renderingEngine.getViewport<
+            InstanceType<typeof LegacyVolumeViewport3D>
+          >(VIEWPORT_ID);
+          // Resizing can recreate the VTK viewport/mapper state. Reattach the
+          // saved world-space crop planes even while the interactive crop tool
+          // is disabled, otherwise the stale mapper can clip the whole volume.
+          croppingTool._updateClippingPlanes(viewport);
+          viewport.render();
         });
         resizeObserver.observe(viewportElementRef.current);
 
