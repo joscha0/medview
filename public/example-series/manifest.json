@@ -3,6 +3,7 @@
     {
       "directory": "CT_1.3.6.1.4.1.14519.5.2.1.9999.103.2144551460887296005007561409842",
       "label": "CT Example",
+      "thumbnail": "thumbnails/ct-example.jpg",
       "files": [
         "00586a04-4b5f-4669-a38b-b8f5b40bd211.dcm",
         "099a2642-aa13-4a02-8308-0435e83f3491.dcm",
@@ -124,6 +125,7 @@
     {
       "directory": "MR_1.3.6.1.4.1.14519.5.2.1.65737884459644906920152749961496542717",
       "label": "MR Example",
+      "thumbnail": "thumbnails/mr-example.jpg",
       "files": [
         "04ade6a1-1a9f-415e-a603-9bab2d060bc8.dcm",
         "056d23aa-4188-4d51-a721-6f1dddeb799e.dcm",

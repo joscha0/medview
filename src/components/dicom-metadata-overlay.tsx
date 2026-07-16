@@ -2,25 +2,9 @@ import { Info, X } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import type { DicomMetadata } from "@/dicom/types";
 
-export type DicomMetadata = {
-  patientName?: string;
-  patientId?: string;
-  patientAge?: string;
-  patientSex?: string;
-  studyDate?: string;
-  modality?: string;
-  studyDescription?: string;
-  seriesDescription?: string;
-  bodyPart?: string;
-  patientPosition?: string;
-  rows?: number;
-  columns?: number;
-  pixelSpacing?: [number, number];
-  sliceThicknessMm?: number;
-  windowCenter?: number;
-  windowWidth?: number;
-};
+export type { DicomMetadata } from "@/dicom/types";
 
 type DicomMetadataOverlayProps = {
   metadata?: DicomMetadata;
@@ -57,7 +41,11 @@ export function DicomMetadataOverlay({
   currentIndex,
   imageCount,
 }: DicomMetadataOverlayProps) {
-  const [isOpen, setIsOpen] = useState(true);
+  const [isOpen, setIsOpen] = useState(
+    () =>
+      typeof window === "undefined" ||
+      window.matchMedia("(min-width: 1024px)").matches,
+  );
   const patientName = formatPatientName(metadata?.patientName);
   const patientDetails = joinMetadata([
     metadata?.patientId ? `ID ${metadata.patientId}` : undefined,
@@ -84,19 +72,21 @@ export function DicomMetadataOverlay({
         type="button"
         variant="outline"
         size="xs"
-        className="absolute right-3 top-3 z-10 border-white/15 bg-black/60 text-white/70 backdrop-blur-sm hover:bg-black/80 hover:text-white"
+        className="absolute left-3 top-3 z-10 h-10 gap-1.5 border-white/10 bg-black/70 px-3 text-sm text-white/70 backdrop-blur-sm hover:bg-black/80 hover:text-white @max-[18rem]:size-10 @max-[18rem]:gap-0 @max-[18rem]:px-0"
+        aria-label="Open DICOM metadata"
+        title="DICOM metadata"
         onClick={() => setIsOpen(true)}
       >
-        <Info />
-        Metadata
+        <Info className="size-4" />
+        <span className="@max-[18rem]:hidden">Metadata</span>
       </Button>
     );
   }
 
   return (
-    <div className="pointer-events-none absolute inset-x-3 top-3 flex items-start justify-between gap-4 font-mono text-[11px] leading-4 text-white/70">
-      {hasStudyContext ? (
-        <div className="metadata-selectable pointer-events-auto max-w-[min(28rem,55%)] rounded bg-black/60 px-2 py-1.5 backdrop-blur-sm">
+    <div className="metadata-selectable pointer-events-auto absolute inset-x-2 top-16 max-w-none rounded bg-black/60 px-2 py-1.5 font-mono text-[11px] leading-4 text-white/70 backdrop-blur-sm md:inset-x-auto md:left-3 md:top-3 md:max-w-[min(28rem,calc(100%-9rem))]">
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-1 md:flex-nowrap">
+        <div className="min-w-0 w-full flex-1 [overflow-wrap:anywhere] md:w-auto">
           {(patientName || patientDetails) && (
             <>
               {patientName && (
@@ -114,26 +104,24 @@ export function DicomMetadataOverlay({
           )}
           {scanDetails && <div>{scanDetails}</div>}
         </div>
-      ) : (
-        <div />
-      )}
-
-      <div className="metadata-selectable pointer-events-auto shrink-0 rounded bg-black/60 px-2 py-1.5 text-right tabular-nums backdrop-blur-sm">
-        <div className="flex items-start justify-end gap-1.5">
-          <div className="text-white/90">
-            {currentIndex + 1} / {imageCount}
-          </div>
+        <div className="flex shrink-0 items-start gap-1.5 tabular-nums">
+          <div className="text-white/90">{currentIndex + 1} / {imageCount}</div>
           <Button
             type="button"
             variant="ghost"
             size="icon-xs"
-            className="pointer-events-auto -mr-1 -mt-0.5 text-white/55 hover:bg-white/10 hover:text-white"
+            className="-mr-1 -mt-0.5 text-white/55 hover:bg-white/10 hover:text-white"
             aria-label="Close DICOM metadata"
             onClick={() => setIsOpen(false)}
           >
             <X />
           </Button>
         </div>
+      </div>
+
+      <div
+        className={hasStudyContext ? "mt-1 border-t border-white/10 pt-1" : ""}
+      >
         {metadata?.columns && metadata.rows && (
           <div>
             {metadata.columns} × {metadata.rows} px
