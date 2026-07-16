@@ -166,7 +166,15 @@ export function useMedViewController() {
 
 
   const displaySeries = useCallback(
-    async (series: DicomSeries, requestedMode: ViewMode) => {
+    async (
+      series: DicomSeries,
+      requestedMode: ViewMode,
+      generation: number,
+    ) => {
+      const isCurrentGeneration = () =>
+        generation === loadGenerationRef.current;
+      if (!isCurrentGeneration()) return;
+
       const renderingEngine = renderingEngineRef.current;
       const element = viewportElementRef.current;
       if (!renderingEngine || !element) {
@@ -196,13 +204,20 @@ export function useMedViewController() {
         await withTimeout(
           viewport.setStack(series.imageIds, series.currentIndex),
           "The selected series could not be displayed in time.",
-          () => removeCachedImage(series.imageIds[series.currentIndex]),
+          () => {
+            if (isCurrentGeneration()) {
+              removeCachedImage(series.imageIds[series.currentIndex]);
+            }
+          },
         );
+        if (!isCurrentGeneration()) return false;
         viewport.render();
+        return true;
       }
 
       if (requestedMode === "stack") {
-        await displayStack(renderingEngine, element);
+        const displayed = await displayStack(renderingEngine, element);
+        if (!displayed || !isCurrentGeneration()) return;
         return { mode: "stack" as const, warning: null };
       }
 
@@ -217,7 +232,8 @@ export function useMedViewController() {
             file.columns,
         );
       if (!hasVolumeGeometry) {
-        await displayStack(renderingEngine, element);
+        const displayed = await displayStack(renderingEngine, element);
+        if (!displayed || !isCurrentGeneration()) return;
         return {
           mode: "stack" as const,
           warning:
@@ -246,14 +262,19 @@ export function useMedViewController() {
             imageIds: series.imageIds,
           }),
           "The 3D volume took too long to prepare.",
-          () => removeCachedVolume(volumeId),
+          () => {
+            if (isCurrentGeneration()) removeCachedVolume(volumeId);
+          },
         );
+        if (!isCurrentGeneration()) return;
+
         await setVolumesForViewports(
           renderingEngine,
           [{ volumeId }],
           [VIEWPORT_ID],
           true,
         );
+        if (!isCurrentGeneration()) return;
 
         const viewport =
           renderingEngine.getViewport<
@@ -269,7 +290,9 @@ export function useMedViewController() {
         alignVolumeCameraForOrbit(viewport);
         series.initialVolumeCamera = cloneCamera(viewport.getCamera());
         viewport.render();
-        volume.load(() => viewport.render());
+        volume.load(() => {
+          if (isCurrentGeneration()) viewport.render();
+        });
         activeVolumeIdRef.current = volumeId;
         setVolumeToolsActive(true);
 
@@ -280,15 +303,22 @@ export function useMedViewController() {
           warning: null,
         };
       } catch (volumeError) {
+        if (!isCurrentGeneration()) return;
         removeCachedVolume(volumeId);
-        await displayStack(renderingEngine, element);
+        const displayed = await displayStack(renderingEngine, element);
+        if (!displayed || !isCurrentGeneration()) return;
         return {
           mode: "stack" as const,
           warning: `3D rendering is unavailable for this series: ${getErrorMessage(volumeError)}`,
         };
       }
     },
-    [activeVolumeIdRef, renderingEngineRef, viewportElementRef],
+    [
+      activeVolumeIdRef,
+      loadGenerationRef,
+      renderingEngineRef,
+      viewportElementRef,
+    ],
   );
 
   const goToImage = useCallback((nextIndex: number) => {
@@ -320,8 +350,17 @@ export function useMedViewController() {
       viewport.setImageIdIndex(safeIndex),
       "This slice took too long to decode.",
       () => removeCachedImage(imageIds[safeIndex]),
-    ).catch((navigationError: unknown) => {
+    ).catch(async (navigationError: unknown) => {
       if (navigationGeneration !== navigationGenerationRef.current) return;
+
+      try {
+        await viewport.setImageIdIndex(previousIndex);
+        viewport.render();
+      } catch {
+        // Preserve the original navigation error reported to the user.
+      }
+      if (navigationGeneration !== navigationGenerationRef.current) return;
+
       currentIndexRef.current = previousIndex;
       if (activeSeries) activeSeries.currentIndex = previousIndex;
       setCurrentIndex(previousIndex);
@@ -360,8 +399,12 @@ export function useMedViewController() {
             ? "Building 3D volume…"
             : "Displaying series…",
         );
-        const result = await displaySeries(series, viewModeRef.current);
-        if (generation !== loadGenerationRef.current) return;
+        const result = await displaySeries(
+          series,
+          viewModeRef.current,
+          generation,
+        );
+        if (generation !== loadGenerationRef.current || !result) return;
 
         viewModeRef.current = result.mode;
         activeSeriesIdRef.current = series.id;
@@ -502,8 +545,12 @@ export function useMedViewController() {
             ? "Building 3D volume…"
             : "Displaying series…",
         );
-        const result = await displaySeries(newSeries, viewModeRef.current);
-        if (generation !== loadGenerationRef.current) {
+        const result = await displaySeries(
+          newSeries,
+          viewModeRef.current,
+          generation,
+        );
+        if (generation !== loadGenerationRef.current || !result) {
           releaseImageIds(candidateImageIds);
           return;
         }
@@ -574,8 +621,8 @@ export function useMedViewController() {
     );
 
     try {
-      const result = await displaySeries(series, nextMode);
-      if (generation !== loadGenerationRef.current) return;
+      const result = await displaySeries(series, nextMode, generation);
+      if (generation !== loadGenerationRef.current || !result) return;
 
       viewModeRef.current = result.mode;
       setViewMode(result.mode);

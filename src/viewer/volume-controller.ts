@@ -125,9 +125,17 @@ export function applyVolumePresentation(
 
 export function removeCachedVolume(volumeId: string | null) {
   if (!volumeId) return;
+
+  const loadObject = cache.getVolumeLoadObject(volumeId);
+  try {
+    loadObject?.cancelFn?.();
+  } catch {
+    // Cancellation may no longer be available once loading has settled.
+  }
+
   const volume = cache.getVolume(volumeId);
-  if (!volume) return;
-  if ("cancelLoading" in volume) volume.cancelLoading();
+  if (volume && "cancelLoading" in volume) volume.cancelLoading();
+
   try {
     cache.removeVolumeLoadObject(volumeId);
   } catch {

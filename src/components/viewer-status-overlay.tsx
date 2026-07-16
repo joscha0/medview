@@ -44,7 +44,11 @@ export function ViewerStatusOverlay({
       )}
 
       {isLoading && (
-        <div className="absolute inset-0 grid place-items-center bg-black/80">
+        <div
+          className="absolute inset-0 z-20 grid place-items-center bg-black/80"
+          role="status"
+          aria-live="polite"
+        >
           <div className="text-center">
             <Loader2 className="mx-auto size-5 animate-spin" />
             <p className="mt-3 text-sm text-muted-foreground">
@@ -55,7 +59,10 @@ export function ViewerStatusOverlay({
       )}
 
       {error && !isLoading && (
-        <Card className="absolute left-1/2 top-4 w-[min(28rem,calc(100%-2rem))] -translate-x-1/2 border-destructive/50 bg-background shadow-none">
+        <Card
+          className="absolute left-1/2 top-4 z-20 w-[min(28rem,calc(100%-2rem))] -translate-x-1/2 border-destructive/50 bg-background shadow-none"
+          role="alert"
+        >
           <CardContent className="flex gap-2.5 p-3 text-sm">
             <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
             <p>{error}</p>
