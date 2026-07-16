@@ -186,8 +186,8 @@ export function useMedViewController() {
         viewportElement: HTMLDivElement,
       ) {
         setVolumeToolsActive(false);
-        activeRenderingEngine.disableElement(VIEWPORT_ID);
         forgetVolumeCropState();
+        activeRenderingEngine.disableElement(VIEWPORT_ID);
         setCropMode("none");
         removeCachedVolume(activeVolumeIdRef.current);
         activeVolumeIdRef.current = null;
@@ -244,8 +244,8 @@ export function useMedViewController() {
       const volumeId = `cornerstoneStreamingImageVolume:medview-${series.id}`;
 
       try {
-        renderingEngine.disableElement(VIEWPORT_ID);
         forgetVolumeCropState();
+        renderingEngine.disableElement(VIEWPORT_ID);
         setCropMode("none");
         removeCachedVolume(activeVolumeIdRef.current);
         activeVolumeIdRef.current = null;

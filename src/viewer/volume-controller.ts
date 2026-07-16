@@ -163,11 +163,17 @@ export function setVolumeToolsActive(active: boolean) {
 }
 
 export function forgetVolumeCropState() {
+  const toolGroup = ToolGroupManager.getToolGroup(TOOL_GROUP_ID);
   const tool = getCroppingTool();
   if (!tool) return;
+
+  tool.setClippingPlanesVisible(false);
+  tool.setHandlesVisible(false);
+  toolGroup?.setToolDisabled(TouchVolumeCroppingTool.toolName);
   tool.originalClippingPlanes = [];
   tool.sphereStates = [];
   tool.edgeLines = {};
+  tool.volumeDirectionVectors = null;
 }
 
 export function bindToolsToViewport() {
