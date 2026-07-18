@@ -1,4 +1,6 @@
-import { CheckCircle2, RefreshCw, WifiOff } from "lucide-react";
+import { useEffect } from "react";
+import { RefreshCw, WifiOff } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { usePwaStatus } from "@/hooks/use-pwa-status";
@@ -12,6 +14,17 @@ export function PwaStatus() {
     isOnline,
     isUpdateAvailable,
   } = usePwaStatus();
+
+  useEffect(() => {
+    if (!isOfflineReady) return;
+
+    toast("Ready to work offline", {
+      id: "pwa-offline-ready",
+      description: "MedView's application files are cached on this device.",
+      duration: 5_000,
+    });
+    dismissOfflineReady();
+  }, [dismissOfflineReady, isOfflineReady]);
 
   return (
     <>
@@ -57,36 +70,6 @@ export function PwaStatus() {
             </Button>
             <Button size="sm" onClick={applyUpdate}>
               Reload
-            </Button>
-          </div>
-        </div>
-      ) : isOfflineReady ? (
-        <div
-          role="dialog"
-          aria-labelledby="offline-ready-title"
-          aria-describedby="offline-ready-description"
-          className="fixed right-4 bottom-4 z-100 w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-white/15 bg-zinc-950/95 p-4 text-zinc-100 shadow-2xl backdrop-blur"
-        >
-          <div className="flex items-start gap-3">
-            <CheckCircle2
-              aria-hidden="true"
-              className="mt-0.5 size-5 shrink-0 text-emerald-400"
-            />
-            <div className="min-w-0 flex-1">
-              <h2 id="offline-ready-title" className="text-sm font-semibold">
-                Ready to work offline
-              </h2>
-              <p
-                id="offline-ready-description"
-                className="mt-1 text-xs leading-5 text-zinc-400"
-              >
-                MedView's application files are cached on this device.
-              </p>
-            </div>
-          </div>
-          <div className="mt-4 flex justify-end">
-            <Button size="sm" onClick={dismissOfflineReady}>
-              OK
             </Button>
           </div>
         </div>
