@@ -10,8 +10,11 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: "autoUpdate",
-      injectRegister: "script-defer",
+      // Let users decide when to reload so an open local study is not lost in
+      // the middle of a deployment.
+      registerType: "prompt",
+      // Registration is handled by virtual:pwa-register/react.
+      injectRegister: null,
       manifest: false,
       workbox: {
         cleanupOutdatedCaches: true,
